@@ -1,0 +1,45 @@
+"""Write the golden renders that tests/test_golden.py compares against (plan §6, §10).
+
+Golden files begin once the rendering policy is frozen (milestone 2). Each is
+the render of a frozen patch in tests/golden, chosen to cover every stage:
+modes and continuous noise, square tones with free phases, damping and bloom
+over many sub-bands, chatter, a choke, drive, struck sine partials, the 44.1
+and 96 kHz exports and a stereo pair. They are not the references, whose
+voicing may still change. Only regenerate them for a deliberate change to the
+sound, and say so in the commit.
+
+    python tools/golden.py
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cymbal.patch import loads  # noqa: E402
+from cymbal.render import export, render_takes  # noqa: E402
+
+GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "golden"
+SETS = {  # name: (files, stereo)
+    "hat": (2, False),
+    "analog": (2, False),
+    "crash": (1, True),
+    "choked": (2, False),
+    "bell": (1, False),
+}
+
+
+def main() -> int:
+    for name, (files, stereo) in SETS.items():
+        p = loads((GOLDEN / f"{name}.toml").read_text(encoding="utf-8"))
+        audio, report = render_takes(p, files, stereo=stereo)
+        for a, f in zip(audio, report.files):
+            export(GOLDEN / f"{name}_{f.number}.wav", a, p, report, f)
+        print(f"{name}: {len(audio)} file(s) of {audio[0].shape} at {p.output.sample_rate} Hz")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
