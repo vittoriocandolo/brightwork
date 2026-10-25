@@ -1,33 +1,45 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""Monotone cubic Hermite curves, their derivatives and jumps, and their time maps (plan §2.2)."""
+
 import math
+from collections.abc import Iterator
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from scipy.interpolate import CubicHermiteSpline, PchipInterpolator
 
 from brightwork_synth.curve import Curve, amplitude_curve, mapped, pchip_slopes, peak_index
 
+type Knots = tuple[NDArray[np.float64], NDArray[np.float64]]
 
-def random_knots(rng):
+SOMETIMES = 0.3  # how often a random curve or shape takes an option
+ENDS = 2  # a curve's first and last knots
+COARSE_DB = 20  # knots this far apart are judged to a tenth of a dB, closer ones to a hundredth
+
+
+def random_knots(rng: np.random.Generator) -> Knots:
+    """Draw knots of one of four kinds: random values, monotone, flat runs, or amplitude-like shapes."""
     n = int(rng.integers(2, 33))
     t = np.cumsum(10 ** rng.uniform(-5, 0, n)) - 10 ** rng.uniform(-6, 0)
-    kind = rng.integers(4)
-    if kind == 0:
-        v = rng.normal(size=n) * 10 ** rng.uniform(-3, 3)
-    elif kind == 1:
-        v = np.sort(rng.uniform(0, 20, n))[:: rng.choice([1, -1])]
-    elif kind == 2:  # flat runs and repeated values
-        v = rng.choice([0.0, 0.5, 1.0, 2.0], n)
-    else:  # amplitude-like shapes
-        v = rng.uniform(0, 1, n)
-        v[0] = v[-1] = 0.0
-        v[rng.integers(1, n - 1) if n > 2 else 0] = 1.0
+    match int(rng.integers(4)):
+        case 0:
+            v = rng.normal(size=n) * 10 ** rng.uniform(-3, 3)
+        case 1:
+            v = np.sort(rng.uniform(0, 20, n))[:: int(rng.choice([1, -1]))]
+        case 2:  # flat runs and repeated values
+            v = np.asarray(rng.choice([0.0, 0.5, 1.0, 2.0], n), dtype=np.float64)
+        case _:  # amplitude-like shapes
+            v = rng.uniform(0, 1, n)
+            v[0] = v[-1] = 0.0
+            v[rng.integers(1, n - 1) if n > ENDS else 0] = 1.0
     return t, v
 
 
-def random_curves(seed, count):
+def random_curves(seed: int, count: int) -> Iterator[tuple[NDArray[np.float64], NDArray[np.float64], Curve]]:
+    """Draw curves through random knots, with the end slopes overridden or not."""
     rng = np.random.default_rng(seed)
     for _ in range(count):
         t, v = random_knots(rng)
@@ -41,6 +53,7 @@ def random_curves(seed, count):
 
 
 def test_slopes_match_scipy_pchip() -> None:
+    """Compute PCHIP slopes, and find SciPy's on 2,000 random knot sets."""
     rng = np.random.default_rng(1)
     for _ in range(2000):
         t, v = random_knots(rng)
@@ -51,6 +64,7 @@ def test_slopes_match_scipy_pchip() -> None:
 
 
 def test_evaluation_matches_independent_hermite() -> None:
+    """Evaluate a curve, and find SciPy's Hermite spline, with every knot reproduced exactly."""
     for t, v, c in random_curves(2, 500):
         x = np.linspace(t[0], t[-1], 997)
         ref = CubicHermiteSpline(t, v, c.d)(x)
@@ -59,9 +73,10 @@ def test_evaluation_matches_independent_hermite() -> None:
 
 
 def test_sliced_evaluation_is_the_same_curve() -> None:
+    """Evaluate a curve segment by segment on sorted times, and find the very same values as point by point."""
     # Synthesis evaluates segment by segment on sorted times; it must give the very same values.
     rng = np.random.default_rng(14)
-    for t, v, c in random_curves(15, 400):
+    for t, _, c in random_curves(15, 400):
         span = t[-1] - t[0]
         x = np.sort(np.concatenate((rng.uniform(t[0] - 0.3 * span, t[-1] + 0.3 * span, 3000), t)))
         assert np.array_equal(c.on(x), c(x))
@@ -69,6 +84,7 @@ def test_sliced_evaluation_is_the_same_curve() -> None:
 
 
 def test_constant_outside_knots() -> None:
+    """Hold a curve's end values outside its knots."""
     for t, v, c in random_curves(3, 200):
         span = t[-1] - t[0]
         assert np.all(c(t[0] - span * np.array([1e-9, 0.5, 3])) == v[0])
@@ -76,6 +92,7 @@ def test_constant_outside_knots() -> None:
 
 
 def test_segments_stay_in_their_knot_interval() -> None:
+    """Keep every segment within its two knot values, as the slopes guarantee and clipping only rounds."""
     # Monotonicity is a property of the slopes, so check it with an independent
     # evaluator that does not clip, then check that clipping removes nothing else.
     worst = 0.0
@@ -94,6 +111,7 @@ def test_segments_stay_in_their_knot_interval() -> None:
 
 
 def test_amplitude_shape_confined_to_unit_interval() -> None:
+    """Keep an amplitude shape within 0 … 1, with zero end slopes."""
     rng = np.random.default_rng(5)
     for _ in range(300):
         n = int(rng.integers(3, 33))
@@ -110,6 +128,7 @@ def test_amplitude_shape_confined_to_unit_interval() -> None:
 
 
 def test_a_damper_never_increases() -> None:
+    """Draw a damper from exactly 1 to exactly 0 that never increases between its knots."""
     # Plan §2.2: from exactly 1 down to exactly 0 through knots that never increase.
     rng = np.random.default_rng(16)
     for _ in range(300):
@@ -117,7 +136,7 @@ def test_a_damper_never_increases() -> None:
         t = np.cumsum(10 ** rng.uniform(-5, -1, n))
         v = np.sort(rng.uniform(0, 1, n))[::-1]
         v[0], v[-1] = 1.0, 0.0
-        if n > 3 and rng.random() < 0.3:
+        if n > ENDS + 1 and rng.random() < SOMETIMES:
             v[1] = 1.0  # a flat start
         c = amplitude_curve(t, v)
         x = np.linspace(t[0] - 0.01, t[-1] + 0.01, 20001)
@@ -128,13 +147,15 @@ def test_a_damper_never_increases() -> None:
 
 
 def test_rejects_bad_knots() -> None:
-    with pytest.raises(ValueError):
+    """Refuse knot times that do not increase, and a single knot."""
+    with pytest.raises(ValueError, match="knot times must increase"):
         Curve([0.0, 0.0], [1.0, 2.0], [0.0, 0.0])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least two knots"):
         Curve([0.0], [1.0], [0.0])
 
 
 def test_derivatives_match_independent_hermite() -> None:
+    """Compute a curve's first and second derivatives, and find SciPy's, and 0 outside the knots."""
     for t, v, c in random_curves(12, 300):
         spline = CubicHermiteSpline(t, c.v, c.d)
         x = np.linspace(t[0], t[-1], 499)[:-1]
@@ -148,6 +169,7 @@ def test_derivatives_match_independent_hermite() -> None:
 
 
 def test_jumps_are_the_one_sided_derivative_differences() -> None:
+    """Compute each knot's jumps in the second and third derivatives, from both sides."""
     for t, v, c in random_curves(13, 300):
         spline = CubicHermiteSpline(t, c.v, c.d)
         d2, d3 = spline.derivative(2), spline.derivative(3)
@@ -162,14 +184,13 @@ def test_jumps_are_the_one_sided_derivative_differences() -> None:
             assert j2[j] == pytest.approx(after2 - before2, rel=1e-8, abs=1e-9 * scale)
             assert j3[j] == pytest.approx(after3 - before3, rel=1e-8, abs=1e-9 * scale / np.min(np.diff(t)))
             b2, a2, b3, a3 = c.sides(j)
-            assert (a2 - b2, a3 - b3) == (
-                pytest.approx(j2[j], rel=1e-14, abs=1e-14 * scale),
-                pytest.approx(j3[j], rel=1e-14, abs=1e-14 * scale / np.min(np.diff(t))),
-            )
+            assert a2 - b2 == pytest.approx(j2[j], rel=1e-14, abs=1e-14 * scale)
+            assert a3 - b3 == pytest.approx(j3[j], rel=1e-14, abs=1e-14 * scale / np.min(np.diff(t)))
 
 
 @pytest.mark.parametrize(("spacing_db", "within_db"), [(6, 0.03), (10, 0.15), (20, 1.3)])
-def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db, within_db) -> None:
+def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db: float, within_db: float) -> None:
+    """Follow an exponential tail within 0.03, 0.15 or 1.3 dB with knots every 6, 10 or 20 dB."""
     # Plan §2.2 authoring guidance, on the interior of a tail.
     tau = 0.1
     step = spacing_db * math.log(10) / 20 * tau
@@ -180,11 +201,12 @@ def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db, within_db
     )
     x = np.linspace(knots[1], knots[-3], 100001)
     deviation = 20 * np.log10(c(x) / np.exp(-(x - 0.001) / tau))
-    assert round(float(np.max(np.abs(deviation))), 2 if spacing_db < 20 else 1) <= within_db
+    assert round(float(np.max(np.abs(deviation))), 2 if spacing_db < COARSE_DB else 1) <= within_db
 
 
 @pytest.mark.parametrize(("spacing_db", "above_db"), [(6, 1.1), (10, 2.0), (20, 5.1)])
-def test_the_first_segment_after_a_peak_is_rounder(spacing_db, above_db) -> None:
+def test_the_first_segment_after_a_peak_is_rounder(spacing_db: float, above_db: float) -> None:
+    """Start a decay flat from its peak, so its first segment lies 1.1 to 5.1 dB above the exponential."""
     # The peak's slope is zero, so the decay starts flat (plan §2.2): a tick needs a shoulder knot.
     tau = 0.1
     step = spacing_db * math.log(10) / 20 * tau
@@ -201,37 +223,41 @@ def test_the_first_segment_after_a_peak_is_rounder(spacing_db, above_db) -> None
 # Time maps.
 
 
-def random_shape(rng, span=2.0):
+def random_shape(rng: np.random.Generator, span: float = 2.0) -> Curve:
+    """Draw an amplitude shape with microsecond knots, sometimes a delayed onset or a plateau at its peak."""
     n = int(rng.integers(3, 33))
     h = 10 ** rng.uniform(-5, 0, n - 1)
     t = np.concatenate(([0.0], np.cumsum(h)))
     t *= min(1.0, span / t[-1])
     t = np.round(t * 1e6) / 1e6  # microsecond knots, as a patch writes them
     t = np.maximum.accumulate(t + np.arange(n) * 1e-6)
-    if rng.random() < 0.3:  # a delayed onset
+    if rng.random() < SOMETIMES:  # a delayed onset
         t = t + rng.uniform(0, 0.05)
     v = rng.uniform(0, 1, n)
     v[0] = v[-1] = 0.0
     v[rng.integers(1, n - 1)] = 1.0
-    if rng.random() < 0.3:  # a plateau at the peak
+    if rng.random() < SOMETIMES:  # a plateau at the peak
         k = int(np.flatnonzero(v == 1.0)[0])
         v[min(k + 1, n - 2)] = 1.0
     return amplitude_curve(t, v)
 
 
-def mapped_time(e, x, r, s):
+def mapped_time(e: Curve, x: NDArray[np.float64], r: float, s: float) -> NDArray[np.float64]:
+    """Return τ(x), the time a sub-band reads its shape at, for a rise stretch r and a decay compression s."""
     t0, tpk = e.t[0], e.t[peak_index(e)]
     turn = t0 + r * (tpk - t0)
-    return np.where(x <= turn, t0 + (x - t0) / r, tpk + s * (x - turn))
+    out: NDArray[np.float64] = np.where(x <= turn, t0 + (x - t0) / r, tpk + s * (x - turn))
+    return out
 
 
 @pytest.mark.parametrize(("span", "top"), [(0.3, 20.0), (2.0, 1000.0)])
-def test_a_mapped_shape_is_the_shape_at_mapped_time(span, top) -> None:
+def test_a_mapped_shape_is_the_shape_at_mapped_time(span: float, top: float) -> None:
+    """Map a shape, and find it the shape read at the mapped time, to the rounding of that time."""
     rng = np.random.default_rng(5)
     for _ in range(300):
         e = random_shape(rng, span)
         r, s = top ** rng.uniform(0, 1), top ** rng.uniform(0, 1)
-        if rng.random() < 0.3:
+        if rng.random() < SOMETIMES:
             r = 1.0
         c = mapped(e, r, s)
         x = np.sort(np.concatenate((rng.uniform(-0.01, c.t[-1] * 1.1, 500), c.t)))
@@ -245,6 +271,7 @@ def test_a_mapped_shape_is_the_shape_at_mapped_time(span, top) -> None:
 
 
 def test_mapped_shapes_keep_their_peak_and_monotone_segments() -> None:
+    """Map a shape, and keep its onset, its peak of exactly 1, and its segments monotone within 0 … 1."""
     rng = np.random.default_rng(6)
     for _ in range(300):
         e = random_shape(rng)
@@ -265,6 +292,7 @@ def test_mapped_shapes_keep_their_peak_and_monotone_segments() -> None:
 
 
 def test_mapped_jumps_scale_on_the_rise_and_the_decay() -> None:
+    """Map a shape, and find its jumps scaled by r⁻², r⁻³ on the rise and s², s³ on the decay."""
     rng = np.random.default_rng(7)
     for _ in range(300):
         e = random_shape(rng, span=0.3)
@@ -289,12 +317,14 @@ def test_mapped_jumps_scale_on_the_rise_and_the_decay() -> None:
 
 
 def test_the_identity_map_is_the_shape_itself() -> None:
+    """Map a shape by r = s = 1, and get the shape itself."""
     e = amplitude_curve([0.0, 0.0004, 0.025, 0.18], [0.0, 1.0, 0.45, 0.0])
     assert mapped(e, 1.0, 1.0) is e
     assert mapped(e) is e
 
 
 def test_a_map_needs_a_flat_peak() -> None:
+    """Refuse to map a shape whose peak is not flat."""
     bent = Curve([0.0, 0.001, 0.01], [0.0, 1.0, 0.0], [0.0, 5.0, 0.0])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="zero slope at the peak"):
         mapped(bent, 1.0, 2.0)

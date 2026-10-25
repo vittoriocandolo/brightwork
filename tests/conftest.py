@@ -4,12 +4,14 @@
 """What the tests share: the plan's example patch and tone, and ways to edit them by path."""
 
 import copy
+import os
 import re
 import tomllib
 from typing import Any
 
 import pytest
 
+from brightwork_synth import wav
 from brightwork_synth.patch import Patch, from_dict
 
 # The illustrative patch from the plan (§4): a closed hi-hat.
@@ -146,3 +148,10 @@ def _made(d: dict[str, Any], edits: dict[str, object]) -> Patch:
     for path, value in edits.items():
         edit(d, path, value)
     return from_dict(d)
+
+
+def meta_of(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Return what a WAV that Brightwork wrote records of how it was made."""
+    meta = wav.read(path).meta
+    assert meta is not None
+    return meta

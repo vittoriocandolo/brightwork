@@ -1,21 +1,44 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""Rendering: the timing contract, output stage, domain rule, drive headroom, takes and pairs (plan §3, §5, §7)."""
+
 import dataclasses
 import math
 
 import numpy as np
 import pytest
+from scipy.signal.windows import tukey
 
-from brightwork_synth import cli, render, spectrum, voice
-from brightwork_synth.loudness import momentary_max
+from brightwork_synth import carrier, cli, render, spectrum, voice
+from brightwork_synth.loudness import momentary_max, true_peak
 from brightwork_synth.patch import loads
 
 from .conftest import EXAMPLE, make, make_tone
 
 
-def amp(*points):
+def amp(*points: tuple[float, float]) -> list[dict[str, float]]:
+    """Write knots as TOML parses them."""
     return [{"ms": m, "gain": g} for m, g in points]
+
+
+def headroom_of(take: render.Take) -> render.Headroom:
+    """Return a take's drive headroom, which every sounding take has."""
+    headroom = take.headroom
+    assert headroom is not None
+    return headroom
+
+
+LENGTH_MS = 120.0  # the example's length: its plates' last knot
+TICK_MS = 5.0  # its tick's
+DAMPED_MS = 50.0  # a damper's last knot, where it ends the sound
+SAMPLES = 5851  # the example's exported samples at 48 kHz
+INTERNAL_RATE, FACTOR = 1536000, 32  # the 48 kHz family's
+MARGIN_DB = 20.0  # the example's margin inside the domain, at least
+FLOOR = 1e-7  # the absolute bound near silence
+MATCHED_DB = 0.01  # how close level matching brings a set's files
+DECORRELATED = 0.2  # a stereo pair's channels correlate less than this
+TOP_COMPRESSION = 2.0  # the closed hat's top sub-band plays its decay √2·√2 = 2 times faster
 
 
 SILENT = {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf}
@@ -28,14 +51,15 @@ HOT = {"noise[1].level_db": 6.0, "drive.db": 24.0}
 
 
 def test_output_length_follows_the_timing_contract() -> None:
+    """Render at every rate as long as the timing contract says, from exactly zero."""
     for rate in (44100, 48000, 88200, 96000):
         p = make_tone(**{"output.sample_rate": rate})
         s = render.synthesize(p)
-        F, factor = render.rates(rate)
-        N = voice.sample_count(0.120, F)
-        L = render.decimator(render.FAMILY[rate]).taps.size
-        assert s.source_samples == N
-        assert s.out.size == (N + L - 2) // factor + 1
+        internal, factor = render.rates(rate)
+        count = voice.sample_count(0.120, internal)
+        taps = render.decimator(render.FAMILY[rate]).taps.size
+        assert s.source_samples == count
+        assert s.out.size == (count + taps - 2) // factor + 1
         audio, report = render.render(p)
         assert audio.size == s.out.size == report.samples
         assert audio.dtype == np.float32
@@ -44,11 +68,12 @@ def test_output_length_follows_the_timing_contract() -> None:
 
 
 def test_the_length_is_the_latest_audible_sub_band_or_the_damper() -> None:
-    assert render.render(make())[1].source_ms == 120.0
+    """End the sound at its latest audible sub-band, silent sources aside, or at the damper's last knot."""
+    assert render.render(make())[1].source_ms == LENGTH_MS
     # A silent source never lengthens the file, however long its shape.
-    assert render.render(make(**{"noise[1].level_db": -math.inf}))[1].source_ms == 5.0
+    assert render.render(make(**{"noise[1].level_db": -math.inf}))[1].source_ms == TICK_MS
     long_tone = {"tone[1].level_db": -math.inf, "tone[1].amp": amp((0, 0), (1, 1), (900, 0))}
-    assert render.render(make_tone(**long_tone))[1].source_ms == 120.0
+    assert render.render(make_tone(**long_tone))[1].source_ms == LENGTH_MS
     # Bloom without damping stretches the rise of the top sub-band, which then ends last.
     bloom = make(**{"noise[1].damping": 0.0, "noise[1].bloom": 1.0})
     lay = spectrum.layout(6000.0, 0.0, 1.0)
@@ -58,20 +83,20 @@ def test_the_length_is_the_latest_audible_sub_band_or_the_damper() -> None:
     assert s.source_samples == voice.sample_count(bloom.length_ms / 1000, s.rate)
     # The damper ends the sound at its last knot.
     damped = render.render(make(**{"damper.amp": amp((30, 1), (36, 0.1), (50, 0))}))[1]
-    assert damped.source_ms == 50.0
+    assert damped.source_ms == DAMPED_MS
 
 
 def test_repeating_a_render_changes_nothing() -> None:
+    """Render twice, and with the table cache cleared, and find the same samples."""
     p = make_tone(**{"drive.db": 18.0, "noise[1].chatter": 0.8})
     assert np.array_equal(render.render(p)[0], render.render(p)[0])
     carrier_cache_cleared = render.render(p)[0]
-    from brightwork_synth import carrier
-
     carrier.clear_cache()
     assert np.array_equal(render.render(p)[0], carrier_cache_cleared)
 
 
 def test_output_gain_and_polarity_never_touch_synthesis() -> None:
+    """Change the output gain, polarity, mode or format, and find the synthesis untouched."""
     base = render.synthesize(make()).out
     for edits in (
         {"output.db": 3.0},
@@ -89,7 +114,8 @@ def test_output_gain_and_polarity_never_touch_synthesis() -> None:
 
 
 @pytest.mark.parametrize("target", [0.0, -0.5, -12.0, -60.0])
-def test_peak_mode_hits_its_target(target) -> None:
+def test_peak_mode_hits_its_target(target: float) -> None:
+    """Bring the peak to its target in peak mode, from 0 to −60 dBFS."""
     audio, report = render.render(make(**{"output.mode": "peak", "output.db": target, "drive.db": 6.0}))
     assert 20 * math.log10(np.max(np.abs(audio))) == pytest.approx(target, abs=1e-6)
     assert np.max(np.abs(audio)) <= 1.0
@@ -97,6 +123,7 @@ def test_peak_mode_hits_its_target(target) -> None:
 
 
 def test_silence_stays_silent() -> None:
+    """Render silence as silence in every mode, reported as silent, with no headroom."""
     for mode in ("gain", "peak"):
         audio, report = render.render(make(**SILENT, **{"output.mode": mode, "output.db": 0.0}))
         assert np.all(audio == 0.0)
@@ -106,6 +133,7 @@ def test_silence_stays_silent() -> None:
 
 
 def test_overs_are_reported_never_clipped() -> None:
+    """Report a render over full scale, and what to lower, without clipping it."""
     audio, report = render.render(make(**{"output.db": 12.0, "drive.db": 12.0}))
     assert report.over
     assert report.peak > 1.0
@@ -116,6 +144,7 @@ def test_overs_are_reported_never_clipped() -> None:
 
 
 def test_a_later_knot_never_changes_earlier_samples() -> None:
+    """Add a knot after the end, and find every sample before its reach unchanged."""
     short = make()
     long = make(**{"noise[1].amp": amp((0, 0), (0.3, 1), (8, 0.45), (30, 0.14), (70, 0.04), (120, 0.01), (400, 0))})
     a, b = render.synthesize(short).out, render.synthesize(long).out
@@ -123,7 +152,7 @@ def test_a_later_knot_never_changes_earlier_samples() -> None:
     # at 30 ms. The top sub-band plays the decay √2·√2 = 2 times faster, so that knot sounds at 0.3 + 29.7 / 2 ms
     # there, and the decimator is causal.
     s = float(spectrum.layout(6000.0, 0.5, 0.0).compression(0.5)[-1])
-    assert s == 2.0
+    assert s == TOP_COMPRESSION
     m = int((0.0003 + 0.0297 / s) * 48000)
     assert np.array_equal(a[:m], b[:m])
     assert not np.array_equal(a[: m + 48], b[: m + 48])
@@ -131,19 +160,20 @@ def test_a_later_knot_never_changes_earlier_samples() -> None:
 
 
 def test_report() -> None:
+    """Report the example: its length, rates, sources, levels and domain, and a tone's realized partials."""
     audio, report = render.render(loads(EXAMPLE))
-    assert report.samples == audio.size == 5851
-    assert report.exported_ms == pytest.approx(1000 * 5851 / 48000)
-    assert report.source_ms == 120.0
-    assert report.internal_rate == 1536000
-    assert report.factor == 32
+    assert report.samples == audio.size == SAMPLES
+    assert report.exported_ms == pytest.approx(1000 * SAMPLES / 48000)
+    assert report.source_ms == LENGTH_MS
+    assert report.internal_rate == INTERNAL_RATE
+    assert report.factor == FACTOR
     t = report.takes[0]
     f = report.files[0]
     assert f.true_peak >= f.peak == t.peak
     assert t.take == 1
     assert f.gain_db == 0.0
     assert report.inside
-    assert t.domain.margin_db > 20
+    assert t.domain.margin_db > MARGIN_DB
     text = str(report)
     assert "noise[1] 714 modes in 6000–16000 Hz, mean spacing 14.00 Hz; 3 sub-bands from 6000 Hz" in text
     assert "noise[2] continuous noise, 3000–18000 Hz; one band" in text
@@ -168,12 +198,21 @@ def test_report() -> None:
 
 
 def test_domain_rule() -> None:
+    """Judge renders by the rule: the saturation term's edge, kinks adding, and the floor near silence."""
     kinks = voice.Kinks((), *(np.zeros(0),) * 5)
 
-    def synth(knee_step, kink, peak):
+    def synth(knee_step: float, kink: float, peak: float) -> render.Synthesis:
         knees = voice.Knees(knee_step, np.zeros(0), np.zeros(0))
         return render.Synthesis(
-            np.array([peak]), 1536000, 32, 1, voice.Slew(knee_step, knees), kinks, kink, 1.0, 24000.0
+            np.array([peak]),
+            1536000,
+            32,
+            1,
+            voice.Slew(knee_step, knees),
+            kinks,
+            kink,
+            1.0,
+            24000.0,
         )
 
     # A linear path with no kinks predicts nothing.
@@ -189,14 +228,11 @@ def test_domain_rule() -> None:
     assert render.domain(synth(0.0, 0.9e-7, 1e-3)).inside
     assert not render.domain(synth(0.0, 1.1e-7, 1e-3)).inside
     assert render.allowed(0.02) == pytest.approx(2e-7)
-    assert render.allowed(0.0099) == 1e-7
+    assert render.allowed(0.0099) == FLOOR
 
 
 def test_true_peak_catches_intersample_peaks() -> None:
-    from scipy.signal.windows import tukey
-
-    from brightwork_synth.loudness import true_peak
-
+    """Estimate the true peak of a sine whose peaks fall between samples, within 1%."""
     n = np.arange(4800)
     x = (0.5 * tukey(n.size, 0.2) * np.sin(2 * np.pi * 12000 / 48000 * n + np.pi / 4)).astype(np.float32)
     assert np.max(np.abs(x)) == pytest.approx(0.5 * math.sqrt(0.5), rel=1e-6)
@@ -206,8 +242,8 @@ def test_true_peak_catches_intersample_peaks() -> None:
 # One render knows the rule at every drive.
 
 
-def rule_inside(edits: dict, drive: float, tone: bool = False) -> bool:
-    """The validated-domain status from a full render at that drive."""
+def rule_inside(edits: dict[str, object], drive: float, *, tone: bool = False) -> bool:
+    """Return the validated-domain status of a full render at a drive."""
     return render.domain(render.synthesize((make_tone if tone else make)(**{**edits, "drive.db": drive}))).inside
 
 
@@ -219,7 +255,8 @@ def rule_inside(edits: dict, drive: float, tone: bool = False) -> bool:
         ({"noise[1].chatter": 0.8, "damper.amp": amp((40, 1), (60, 0))}, True),
     ],
 )
-def test_one_render_knows_the_knee_slew_and_kink_bound_at_every_drive(edits, tone) -> None:
+def test_one_render_knows_the_knee_slew_and_kink_bound_at_every_drive(edits: dict[str, object], *, tone: bool) -> None:
+    """Predict the knee slew, kink bound and peak at any drive from one render, as full renders find them."""
     base = render.synthesize((make_tone if tone else make)(**edits, **{"drive.db": 0.0}))
     for d in (0.5, 6.0, 18.0, 30.0, 48.0):
         s = render.synthesize((make_tone if tone else make)(**edits, **{"drive.db": d}))
@@ -228,6 +265,8 @@ def test_one_render_knows_the_knee_slew_and_kink_bound_at_every_drive(edits, ton
         assert voice.kink_bound(base.kinks, a, s.rate, s.band) == s.kink
         assert voice.kink_bounds(base.kinks, [a], s.rate, s.band)[0] == pytest.approx(s.kink, rel=1e-12)
         # The probes give the exact output at the render's own drive, so their peak is the output peak.
+        assert s.probes is not None
+        assert base.probes is not None
         assert s.probes.peak([a])[0] == pytest.approx(np.max(np.abs(s.out)), rel=1e-12)
         assert base.probes.peak([a])[0] <= np.max(np.abs(s.out)) * (1 + 1e-12)  # elsewhere, a lower bound
 
@@ -236,10 +275,11 @@ def test_one_render_knows_the_knee_slew_and_kink_bound_at_every_drive(edits, ton
     "edits",
     [{"drive.db": 6.0}, {**HOT}, {**FAST, "drive.db": 0.0}, {"noise[2].level_db": 3.0, "drive.db": 10.0}],
 )
-def test_drive_headroom_finds_where_the_status_changes(edits) -> None:
+def test_drive_headroom_finds_where_the_status_changes(edits: dict[str, object]) -> None:
+    """Report the drive at which the status changes, and find full renders either side of it."""
     report = render.render(make(**edits))[1]
     drive = make(**edits).drive.db
-    h = report.takes[0].headroom
+    h = headroom_of(report.takes[0])
     assert h.db == pytest.approx(h.edge_db - drive)
     # Full renders on either side of the reported edge.
     assert rule_inside(edits, h.edge_db - 0.01)
@@ -248,6 +288,7 @@ def test_drive_headroom_finds_where_the_status_changes(edits) -> None:
 
 
 def test_drive_headroom_never_skips_an_outside_island() -> None:
+    """Find the narrow outside island just below a drop of the knee slew, from inside it and from below."""
     # A frontier step with reach 0.1 counts only while α ≤ 10, so with q = α·0.1 up to there and α·0.05 after,
     # the rule is outside from α = 10·q* (q* = π²/ln(SATURATION/LIMIT)), inside again past α = 10, and outside
     # for good from α = 20·q*.
@@ -256,7 +297,7 @@ def test_drive_headroom_never_skips_an_outside_island() -> None:
     probes = render.Probes(np.array([50.0]), ((0, np.array([1.0])),))  # a saturated probe: the peak is 1 at every drive
     alpha = voice.drive_alpha(12.0)
 
-    def at(a):
+    def at(a: float) -> render.Synthesis:
         return render.Synthesis(np.array([1.0]), 1536000, 32, 1, voice.Slew(0.1, knees), kinks, 0.0, a, 24000.0, probes)
 
     threshold = math.pi**2 / math.log(render.SATURATION / render.LIMIT)
@@ -266,6 +307,7 @@ def test_drive_headroom_never_skips_an_outside_island() -> None:
     d = render.domain(at(alpha))
     assert d.inside
     h = render.drive_headroom(at(alpha), 12.0, d)
+    assert h is not None
     assert render.alphas([h.edge_db])[0] == pytest.approx(island, rel=1e-5)
     # From inside the island, the way back in is below it.
     inside_island = 0.5 * (island + 10.0)
@@ -273,13 +315,15 @@ def test_drive_headroom_never_skips_an_outside_island() -> None:
     s = at(inside_island)
     assert not render.domain(s).inside
     h = render.drive_headroom(s, drive, render.domain(s))
+    assert h is not None
     assert h.db < 0
     assert render.alphas([h.edge_db])[0] == pytest.approx(island, rel=1e-5)
 
 
 def test_drive_headroom_at_the_extremes() -> None:
+    """Report inside at every drive for a quiet hit, and outside without drive for a fast spike."""
     quiet = render.render(make(**{"noise[1].level_db": -45.0, "noise[2].level_db": -45.0}))[1]
-    assert quiet.takes[0].headroom.db == math.inf
+    assert headroom_of(quiet.takes[0]).db == math.inf
     assert "inside at every drive up to 48 dB" in str(quiet)
     # A 30 µs spike of full-band noise aliases above the limit with no drive at all.
     spike = {
@@ -291,14 +335,16 @@ def test_drive_headroom_at_the_extremes() -> None:
     }
     fast = render.render(make(**spike))[1]
     assert not fast.inside
-    assert fast.takes[0].headroom.db == -math.inf
+    assert headroom_of(fast.takes[0]).db == -math.inf
     assert "outside even without drive: the kinks alone exceed the limit" in str(fast)
 
 
 def test_the_cause_names_what_to_change() -> None:
+    """Name what the predicted aliasing comes from: the knot that contributes most, or the saturation."""
     fast = render.render(make(**FAST, **{"drive.db": 0.0}))[1]
     c = fast.takes[0].cause
     assert c.dominant == "kinks"
+    assert c.knot is not None
     assert c.knot.startswith("noise[2].amp[")
     assert 0 < c.share <= 1
     assert c.knot_ms == {"noise[2].amp[1]": 0.0, "noise[2].amp[2]": 0.01, "noise[2].amp[3]": 0.11}[c.knot]
@@ -315,22 +361,28 @@ def test_the_cause_names_what_to_change() -> None:
     # A damper's knots are named like any other.
     choked = make(**{"damper.amp": amp((20, 1), (20.01, 0))})
     c = render.render(choked)[1].takes[0].cause
+    assert c.knot is not None
     assert c.knot.startswith("damper.amp[")
     assert c.knot_ms in (20.0, 20.01)
 
 
 def test_knot_times_by_path() -> None:
+    """Find a knot's time by its path, as the patch writes it."""
     p = make_tone(**{"damper.amp": amp((30, 1), (35, 0.3), (50, 0))})
-    assert render.knot_ms(p, "noise[1].amp[2]") == 0.3
-    assert render.knot_ms(p, "noise[2].amp[5]") == 5.0
-    assert render.knot_ms(p, "tone[1].amp[4]") == 20.0
-    assert render.knot_ms(p, "damper.amp[3]") == 50.0
+    for path, ms in (
+        ("noise[1].amp[2]", 0.3),
+        ("noise[2].amp[5]", 5.0),
+        ("tone[1].amp[4]", 20.0),
+        ("damper.amp[3]", 50.0),
+    ):
+        assert render.knot_ms(p, path) == ms
 
 
 # Takes and stereo pairs.
 
 
 def test_takes_are_the_same_cymbal_struck_again() -> None:
+    """Render takes as the patch struck again, and struck tones alone the same in every take."""
     p = make_tone(**{"drive.db": 9.0})
     audio, report = render.render_takes(p, 3)
     assert [t.take for t in report.takes] == [1, 2, 3]
@@ -342,36 +394,39 @@ def test_takes_are_the_same_cymbal_struck_again() -> None:
     assert "seed 1, takes 1–3" in str(report)
     # Struck tones alone are the same sound in every take.
     struck = make_tone(**SILENT, **{"tone[1].phase": "strike"})
-    a = render.render_takes(struck, 2)[0]
-    assert np.array_equal(a[0], a[1])
+    pair = render.render_takes(struck, 2)[0]
+    assert np.array_equal(pair[0], pair[1])
 
 
 def test_a_set_shares_one_gain() -> None:
+    """Bring a peak-mode set's loudest take to the target, and the others in proportion."""
     p = make(**{"output.mode": "peak", "output.db": -1.0})
     audio, report = render.render_takes(p, 4)
     peaks = [float(np.max(np.abs(a))) for a in audio]
     assert 20 * math.log10(max(peaks)) == pytest.approx(-1.0, abs=1e-6)
-    assert len(set(peaks)) == 4  # the others keep their natural levels
+    assert len(set(peaks)) == len(audio)  # the others keep their natural levels
     unity = [np.max(np.abs(render.synthesize(dataclasses.replace(p, take=t)).out)) for t in (1, 2, 3, 4)]
     np.testing.assert_allclose(np.array(peaks) / max(peaks), np.array(unity) / max(unity), rtol=1e-6)
     assert report.set_gain_db == pytest.approx(-1.0 - 20 * math.log10(max(unity)), abs=1e-9)
 
 
 def test_level_matching_scales_each_file_to_the_first() -> None:
+    """Level-match a set's files to the first, and say so."""
     p = loads(cli.reference_text("closed"))
-    loose, report = render.render_takes(p, 4)
+    _, report = render.render_takes(p, 4)
     matched, mreport = render.render_takes(p, 4, level_match=True)
     rate = p.output.sample_rate
     first = momentary_max(matched[0], rate)
     for a in matched:
-        assert momentary_max(a, rate) == pytest.approx(first, abs=0.01)
-    assert mreport.loudness_spread <= 0.01 < report.loudness_spread
+        assert momentary_max(a, rate) == pytest.approx(first, abs=MATCHED_DB)
+    assert mreport.loudness_spread <= MATCHED_DB < report.loudness_spread
     assert mreport.files[0].gain_db == 0.0
     assert any(f.gain_db != 0.0 for f in mreport.files)
     assert "level-matched to the first" in str(mreport)
 
 
 def test_the_report_flags_uneven_sets() -> None:
+    """Flag a set whose takes spread over 1 dB, and suggest level matching."""
     click = make(
         **{
             "noise[1].level_db": -math.inf,
@@ -390,6 +445,7 @@ def test_the_report_flags_uneven_sets() -> None:
 
 
 def test_take_numbers_stay_in_range() -> None:
+    """Number a set's takes from the patch's take, and refuse takes past 2**31 or a count out of range."""
     with pytest.raises(render.RenderError):
         render.take_numbers(make(take=2**31 - 1), 3)
     assert render.take_numbers(make(take=2**31 - 2), 3)[-1] == 2**31
@@ -402,9 +458,10 @@ def test_take_numbers_stay_in_range() -> None:
 
 
 def test_a_stereo_file_is_two_consecutive_takes() -> None:
+    """Pair consecutive takes as stereo files, the channels unlike in detail, sharing the set's gain."""
     p = make_tone(take=3)
     audio, report = render.render_takes(p, 2, stereo=True)
-    assert len(audio) == 2
+    assert len(audio) == len(report.files)
     assert all(a.shape == (report.samples, 2) and a.dtype == np.float32 for a in audio)
     assert [t.take for t in report.takes] == [3, 4, 5, 6]
     assert [f.takes for f in report.files] == [(0, 1), (2, 3)]
@@ -418,7 +475,7 @@ def test_a_stereo_file_is_two_consecutive_takes() -> None:
     assert "take 6 (right)" in text
     # The channels are the same cymbal struck twice: alike in level, unlike in detail.
     left, right = audio[0][:, 0].astype(float), audio[0][:, 1].astype(float)
-    assert abs(np.dot(left, right)) / math.sqrt(np.dot(left, left) * np.dot(right, right)) < 0.2
+    assert abs(np.dot(left, right)) / math.sqrt(np.dot(left, left) * np.dot(right, right)) < DECORRELATED
     assert report.files[0].loudness == pytest.approx(momentary_max(audio[0], 48000))
     # In peak mode the pair shares the set gain, and the loudest channel of any file meets the target.
     peaked, preport = render.render_takes(make_tone(**{"output.mode": "peak", "output.db": -1.0}), 2, stereo=True)
