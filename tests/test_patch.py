@@ -1,9 +1,12 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""The patch: parsing, validation, canonical TOML, the valid domain and the editing commands (plan §4, §5)."""
+
 import dataclasses
 import math
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -12,6 +15,11 @@ from brightwork_synth import patch
 from brightwork_synth.patch import PatchError, dumps, from_dict, loads
 
 from .conftest import EXAMPLE, TONE, example, make, make_tone
+
+LENGTH_MS = 120.0  # the example's length: its plates' last knot
+TICK_MS = 5.0  # its tick's
+SOMETIMES = 0.5  # how often a random patch has a damper
+SHIFT = 0.002  # ms: how far composing two softer strikes may round a knot from one
 
 
 def problems(fn: Callable[..., object], *args: object, **kwargs: object) -> list[str]:
@@ -45,9 +53,10 @@ def partials(*pairs: tuple[float, float]) -> list[dict[str, float]]:
 
 
 def test_example_parses() -> None:
+    """Parse the plan's example into its sources, damper, drive and output, and a tone's reference frequency."""
     p = loads(EXAMPLE)
     assert (p.seed, p.take) == (1, 1)
-    assert len(p.noise) == 2
+    assert len(p.noise) == len(("plates", "tick"))
     assert p.tone == ()
     assert p.noise[0] == patch.Noise(
         -2.0,
@@ -62,32 +71,35 @@ def test_example_parses() -> None:
     assert p.damper == patch.Damper(())
     assert p.drive == patch.Drive(0.0)
     assert p.output == patch.Output(48000, "float32", "gain", -6.0, 1)
-    assert p.length_ms == 120.0
+    assert p.length_ms == LENGTH_MS
     q = make_tone()
     assert q.tone[0].partials[0] == (205.3, 0.0)
-    assert q.tone[0].f_ref == 7000.0
+    assert q.tone[0].f_ref == q.tone[0].band_hz[0]
     assert [prefix for prefix, _ in q.sources] == ["noise[1]", "noise[2]", "tone[1]"]
 
 
-def random_shape(rng, n, first, limit):
+def random_shape(rng: np.random.Generator, n: int, first: float, limit: float) -> tuple[tuple[float, float], ...]:
+    """Draw an amplitude shape of n knots from `first`, spread over up to `limit` ms."""
     times = [first, *(first + np.cumsum(rng.uniform(0.01, limit / n, n - 1)))]
     g = list(rng.uniform(0, 1, n))
     g[0] = g[-1] = 0.0
     g[int(rng.integers(1, n - 1))] = 1.0
-    return tuple(zip(times, g))
+    return tuple(zip(times, g, strict=True))
 
 
-def random_patch(rng) -> patch.Patch:
-    def common(lo, f_ref):
+def random_patch(rng: np.random.Generator) -> patch.Patch:
+    """Draw a valid patch: up to four noise sources and two tones, a damper sometimes, any output."""
+
+    def common(f_ref: float) -> dict[str, Any]:
         # Damping and bloom within the 1000-fold limit at 20 kHz.
         top = math.log(1000) / math.log(max(20000 / f_ref, 1.0001))
-        return dict(
-            damping=float(rng.uniform(0, min(3, top))),
-            bloom=float(rng.choice([0.0, rng.uniform(0, min(0.5, top))])),
-            chatter=float(rng.uniform(0, 1)),
-            chatter_hz=float(rng.uniform(10, 4000)),
-            amp=random_shape(rng, int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1500),
-        )
+        return {
+            "damping": float(rng.uniform(0, min(3, top))),
+            "bloom": float(rng.choice([0.0, rng.uniform(0, min(0.5, top))])),
+            "chatter": float(rng.uniform(0, 1)),
+            "chatter_hz": float(rng.uniform(10, 4000)),
+            "amp": random_shape(rng, int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1500),
+        }
 
     noise = []
     for _ in range(int(rng.integers(0, 5))):
@@ -97,15 +109,14 @@ def random_patch(rng) -> patch.Patch:
                 level_db=float(rng.choice([-math.inf, rng.uniform(-90, 24)])),
                 band_hz=(lo, float(rng.uniform(lo + 1, 20000))),
                 spacing_hz=float(rng.choice([0.0, rng.uniform(1, 200)])),
-                **common(lo, lo),
+                **common(lo),
             ),
         )
     tones = []
     for _ in range(int(rng.integers(0 if noise else 1, 3))):
         n = int(rng.integers(1, 17))
-        hz = np.sort(rng.uniform(20, 19000, n))
-        hz = [float(f) for f in hz if True]
-        hz = [f for i, f in enumerate(hz) if i == 0 or round(f * 8) > round(hz[i - 1] * 8)]
+        drawn = [float(f) for f in np.sort(rng.uniform(20, 19000, n))]
+        hz = [f for i, f in enumerate(drawn) if i == 0 or round(f * 8) > round(drawn[i - 1] * 8)]
         levels = list(rng.uniform(-60, 0, len(hz)))
         levels[int(rng.integers(len(hz)))] = 0.0
         lo = float(rng.uniform(20, 19000))
@@ -114,18 +125,18 @@ def random_patch(rng) -> patch.Patch:
                 level_db=float(rng.uniform(-90, 24)),
                 wave=str(rng.choice(patch.WAVES)),
                 phase=str(rng.choice(patch.PHASES)),
-                partials=tuple(zip(hz, levels)),
+                partials=tuple(zip(hz, levels, strict=True)),
                 band_hz=(lo, float(rng.uniform(lo + 1, 20000))),
-                **common(lo, max(lo, hz[0])),
+                **common(max(lo, hz[0])),
             ),
         )
-    damper = ()
-    if rng.random() < 0.5:
+    damper: tuple[tuple[float, float], ...] = ()
+    if rng.random() < SOMETIMES:
         n = int(rng.integers(2, 33))
         t = 100 + np.cumsum(rng.uniform(0.01, 50, n))
         g = np.sort(rng.uniform(0, 1, n))[::-1]
         g[0], g[-1] = 1.0, 0.0
-        damper = tuple(zip(map(float, t), map(float, g)))
+        damper = tuple(zip(map(float, t), map(float, g), strict=True))
     mode = str(rng.choice(["gain", "peak"]))
     return patch.Patch(
         seed=int(rng.integers(0, 2**63 - 1)),
@@ -145,6 +156,7 @@ def random_patch(rng) -> patch.Patch:
 
 
 def test_dump_round_trips_exactly() -> None:
+    """Write 300 random patches, read each back the same, and write it again the same."""
     rng = np.random.default_rng(0)
     for _ in range(300):
         p = random_patch(rng)
@@ -154,22 +166,25 @@ def test_dump_round_trips_exactly() -> None:
 
 
 def test_dump_of_example_keeps_the_plan_layout() -> None:
+    """Write the example line for line as the plan lays it out, its comments naming sources by path."""
     ours, plan = dumps(loads(EXAMPLE)).splitlines(), EXAMPLE.splitlines()
     assert len(ours) == len(plan)
-    for a, b in zip(ours, plan):
+    for a, b in zip(ours, plan, strict=True):
         # The plan annotates its sources; the canonical comments name them by path.
         assert a.split("#")[0].rstrip() == b.split("#")[0].rstrip()
     assert ours[:4] == plan[:4]
 
 
-def test_instrument_comes_first(example_dict) -> None:
+def test_instrument_comes_first(example_dict: dict[str, Any]) -> None:
+    """Refuse a patch without an instrument, or another instrument's, before anything else."""
     d = {k: v for k, v in example_dict.items() if k != "instrument"}
     assert problems(from_dict, d) == ['instrument: missing; a cymbal patch starts with instrument = "cymbal"']
     d = dict(example_dict, instrument="snare", colour="red")
     assert problems(from_dict, d) == ["instrument: this is a 'snare' patch, not a \"cymbal\" one"]
 
 
-def test_schema_versions(example_dict) -> None:
+def test_schema_versions(example_dict: dict[str, Any]) -> None:
+    """Refuse a missing, wrongly typed or newer schema, alone, before any other problem."""
     for bad, message in ((2, "unsupported version 2"), ("1", "expected an integer"), (True, "expected an integer")):
         assert message in problems(from_dict, dict(example_dict, schema=bad))[0]
     d = {k: v for k, v in example_dict.items() if k != "schema"}
@@ -178,6 +193,7 @@ def test_schema_versions(example_dict) -> None:
 
 
 def test_integers_accepted_for_floats_but_not_booleans() -> None:
+    """Read integers where floats belong, as floats, but never booleans, and never floats where integers belong."""
     p = make(
         **{"noise[1].band_hz": [6000, 16000], "drive.db": 0, "noise[1].spacing_hz": 14, "noise[1].chatter_hz": 220},
     )
@@ -193,7 +209,8 @@ def test_integers_accepted_for_floats_but_not_booleans() -> None:
     )
 
 
-def test_unknown_and_missing_fields(example_dict) -> None:
+def test_unknown_and_missing_fields(example_dict: dict[str, Any]) -> None:
+    """Report every unknown field and every missing one, by path."""
     d = example_dict
     d["colour"] = "red"
     d["noise"][0]["decay"] = 1.0
@@ -210,7 +227,8 @@ def test_unknown_and_missing_fields(example_dict) -> None:
     assert "drive: missing" in found
 
 
-def test_every_field_is_required_but_the_source_arrays(example_dict) -> None:
+def test_every_field_is_required_but_the_source_arrays(example_dict: dict[str, Any]) -> None:
+    """Require every field, and at least one source, but neither source array."""
     for section in ("damper", "drive", "output"):
         for key in list(example_dict[section]):
             d = dict(example_dict)
@@ -237,6 +255,7 @@ def test_every_field_is_required_but_the_source_arrays(example_dict) -> None:
 
 
 def test_non_finite_numbers() -> None:
+    """Accept -inf as a source level's silence, and refuse every other non-finite number."""
     assert make(**{"noise[2].level_db": -math.inf}).noise[1].level_db == -math.inf
     assert make_tone(**{"tone[1].level_db": -math.inf}).tone[0].level_db == -math.inf
     for path in ("noise[1].level_db",):
@@ -249,6 +268,7 @@ def test_non_finite_numbers() -> None:
 
 
 def test_knot_times() -> None:
+    """Refuse knot times that repeat, go back, or come closer than 10 µs as written."""
     found = reject(**{"noise[1].amp": amp((0, 0), (1, 1), (1, 0.5), (2, 0))})
     assert any("repeats the previous knot time" in m for m in found)
     found = reject(**{"noise[1].amp": amp((0, 0), (2, 1), (1, 0.5), (3, 0))})
@@ -261,6 +281,7 @@ def test_knot_times() -> None:
 
 
 def test_amplitude_shapes() -> None:
+    """Refuse shapes that do not start and end at 0 or peak at exactly 1; allow a delayed onset."""
     assert "noise[1].amp[1].gain: an amplitude shape must start at 0" in reject(
         **{"noise[1].amp": amp((0, 0.1), (1, 1), (2, 0))},
     )
@@ -277,9 +298,10 @@ def test_amplitude_shapes() -> None:
 
 
 def test_dampers() -> None:
+    """Accept a damper from exactly 1 to exactly 0 that never increases, and end the sound at its last knot."""
     knots = amp((100, 1), (110, 0.3), (120, 0.3), (140, 0))
     assert make(**{"damper.amp": knots}).damper.amp[0] == (100.0, 1.0)
-    assert make(**{"damper.amp": amp((100, 1), (140, 0))}).length_ms == 120.0
+    assert make(**{"damper.amp": amp((100, 1), (140, 0))}).length_ms == LENGTH_MS
     assert "damper.amp[1].gain: a damper must start at exactly 1" in reject(**{"damper.amp": amp((100, 0.9), (140, 0))})
     assert "damper.amp[2].gain: a damper must end at exactly 0" in reject(**{"damper.amp": amp((100, 1), (140, 0.1))})
     found = reject(**{"damper.amp": amp((100, 1), (110, 0.2), (120, 0.4), (140, 0))})
@@ -288,9 +310,10 @@ def test_dampers() -> None:
     assert any("damper.amp[2].ms" in m for m in reject(**{"damper.amp": amp((100, 1), (8000.5, 0))}))
 
 
-def test_noise_sources(example_dict) -> None:
+def test_noise_sources(example_dict: dict[str, Any]) -> None:
+    """Accept up to four noise sources, bands within 20 Hz – 20 kHz, and spacings of 0 or 1–200 Hz."""
     four = dict(example_dict, noise=example_dict["noise"] * 2)
-    assert len(from_dict(four).noise) == 4
+    assert len(from_dict(four).noise) == patch.MAX_NOISE
     assert "noise: at most 4 noise sources, found 5" in problems(
         from_dict,
         dict(example_dict, noise=example_dict["noise"] * 2 + example_dict["noise"][:1]),
@@ -308,16 +331,17 @@ def test_noise_sources(example_dict) -> None:
     ):
         assert any(m.startswith(path + ":") for m in reject(**{"noise[1].band_hz": bad}))
     assert "noise[2].band_hz: expected [low, high] in Hz" in reject(**{"noise[2].band_hz": [100.0]})
-    for good in (0.0, 1.0, 200.0):
-        make(**{"noise[1].spacing_hz": good})
-    for bad in (0.5, -1.0, 200.5):
-        assert any(m.startswith("noise[1].spacing_hz") for m in reject(**{"noise[1].spacing_hz": bad}))
+    for spacing in (0.0, 1.0, 200.0):
+        make(**{"noise[1].spacing_hz": spacing})
+    for spacing in (0.5, -1.0, 200.5):
+        assert any(m.startswith("noise[1].spacing_hz") for m in reject(**{"noise[1].spacing_hz": spacing}))
 
 
 def test_tones() -> None:
+    """Accept up to two tones, with 1–16 partials a grid step apart, the loudest at exactly 0 dB."""
     d = example(tone=True)
     d["tone"] = [TONE, TONE]
-    assert len(from_dict(d).tone) == 2
+    assert len(from_dict(d).tone) == patch.MAX_TONES
     d["tone"] = [TONE] * 3
     assert "tone: at most 2 tone sources, found 3" in problems(from_dict, d)
     assert any(m.startswith("tone[1].wave") for m in reject_tone(**{"tone[1].wave": "saw"}))
@@ -336,10 +360,12 @@ def test_tones() -> None:
         for m in reject_tone(**{"tone[1].partials": partials((500.0, 0.0), (600.0, -61.0))})
     )
     # The reference frequency is the higher of the band's lower edge and the lowest partial.
-    assert make_tone(**{"tone[1].band_hz": [20.0, 20000.0]}).tone[0].f_ref == 205.3
+    low = make_tone(**{"tone[1].band_hz": [20.0, 20000.0]}).tone[0]
+    assert low.f_ref == low.partials[0][0]
 
 
 def test_damping_and_bloom_limits() -> None:
+    """Refuse damping or bloom past 1000-fold at 20 kHz, and a sub-band that would end after 8 s."""
     # (20 kHz / 300 Hz)^damping must stay within 1000: damping 1.64 passes, 1.65 does not.
     make(**{"noise[1].band_hz": [300.0, 18000.0], "noise[1].damping": 1.64})
     found = reject(**{"noise[1].band_hz": [300.0, 18000.0], "noise[1].damping": 1.65})
@@ -371,7 +397,8 @@ def test_damping_and_bloom_limits() -> None:
         ("take", [1, 2**31], [0, 2**31 + 1]),
     ],
 )
-def test_domain_edges(path, good, bad) -> None:
+def test_domain_edges(path: str, good: list[object], bad: list[object]) -> None:
+    """Accept each field's range up to its edges, and refuse just past them."""
     for v in good:
         make(**{path: v, "output.db": -6.0} if path == "output.mode" else {path: v})
     for v in bad:
@@ -379,11 +406,13 @@ def test_domain_edges(path, good, bad) -> None:
 
 
 def test_peak_target_is_at_most_full_scale() -> None:
+    """Refuse a peak target above 0 dBFS."""
     make(**{"output.mode": "peak", "output.db": 0.0})
     assert any(m.startswith("output.db") for m in reject(**{"output.mode": "peak", "output.db": 0.1}))
 
 
 def test_all_problems_are_reported_together() -> None:
+    """Report every problem at once, of structure and of value."""
     found = reject(
         **{
             "noise[1].damping": 4.0,
@@ -393,7 +422,7 @@ def test_all_problems_are_reported_together() -> None:
             "noise[1].amp": amp((0, 0), (1, 0.5), (2, 0)),
         },
     )
-    assert len(found) == 5
+    assert len(found) == len(("damping", "drive", "mode", "chatter", "peak"))
     # Problems of structure and of value come together too: an unknown field, a seed and a damping.
     d = example()
     d["noise"][0]["dampning"] = 1.0
@@ -404,10 +433,12 @@ def test_all_problems_are_reported_together() -> None:
 
 
 def test_toml_syntax_errors_are_patch_errors() -> None:
+    """Report a TOML syntax error as a patch's problem."""
     assert problems(loads, 'instrument = "cymbal"\nschema = 1\n[drive\n')[0].startswith("TOML:")
 
 
 def test_programmatic_edits_are_validated() -> None:
+    """Validate a patch however it is built, by the parser or by an edit."""
     p = loads(EXAMPLE)
     with pytest.raises(PatchError):
         dataclasses.replace(p, noise=(dataclasses.replace(p.noise[0], damping=3.5),))
@@ -415,25 +446,28 @@ def test_programmatic_edits_are_validated() -> None:
         dataclasses.replace(p, seed=-5)
     with pytest.raises(PatchError):
         dataclasses.replace(p, noise=p.noise * 3)
-    assert dataclasses.replace(p, take=7).take == 7
+    take = p.take + 6
+    assert dataclasses.replace(p, take=take).take == take
 
 
 def test_source_length_counts_only_audible_sources() -> None:
-    assert make().length_ms == 120.0
-    assert make(**{"noise[1].level_db": -math.inf}).length_ms == 5.0
+    """Count only audible sources' sub-bands in the length, which bloom without damping lengthens."""
+    assert make().length_ms == LENGTH_MS
+    assert make(**{"noise[1].level_db": -math.inf}).length_ms == TICK_MS
     silent = {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf}
     assert make(**silent).length_ms == 0.0
     # Damping shortens only the high sub-bands, so the shape's end still sets the length.
-    assert make(**{"noise[1].damping": 2.0}).length_ms == 120.0
+    assert make(**{"noise[1].damping": 2.0}).length_ms == LENGTH_MS
     # Bloom delays the high sub-bands' peaks and with no damping lengthens the sound.
     longer = make(**{"noise[1].damping": 0.0, "noise[1].bloom": 1.0})
     ends = patch.sub_band_ends(longer.noise[0])
-    assert longer.length_ms == max(ends) > 120.0
+    assert longer.length_ms == max(ends) > LENGTH_MS
     assert max(ends) == pytest.approx(0.3 * 2 ** (math.ceil(2 * math.log2(20000 / 6000)) / 2) + 119.7)
 
 
 def test_notes() -> None:
-    assert patch.parse_note("A4") == 440.0
+    """Read and name notes, and describe a frequency by its nearest note and cents."""
+    assert patch.parse_note("A4") == pytest.approx(440.0)
     assert patch.parse_note("C#4") == patch.parse_note("Db4")
     assert patch.parse_note("D5") == pytest.approx(587.3295, rel=1e-6)
     assert patch.parse_note("+2") is None
@@ -447,6 +481,7 @@ def test_notes() -> None:
 
 
 def test_pitch_scales_every_frequency_and_keeps_the_times() -> None:
+    """Pitch every frequency by one ratio, or a tone's lowest partial to a note, the times unchanged."""
     p = make_tone()
     lower = {
         "noise[1].band_hz": [3000.0, 9000.0],
@@ -455,8 +490,8 @@ def test_pitch_scales_every_frequency_and_keeps_the_times() -> None:
     }
     up = patch.pitch(make_tone(**lower), "+12")
     assert up.noise[0].band_hz == (6000.0, 18000.0)
-    assert up.noise[0].spacing_hz == 28.0
-    assert up.noise[0].chatter_hz == 440.0
+    assert up.noise[0].spacing_hz == 2 * p.noise[0].spacing_hz
+    assert up.noise[0].chatter_hz == 2 * p.noise[0].chatter_hz
     assert up.tone[0].partials[0] == (410.6, 0.0)
     assert up.tone[0].band_hz == (6000.0, 16000.0)
     assert up.noise[0].amp == p.noise[0].amp
@@ -467,7 +502,7 @@ def test_pitch_scales_every_frequency_and_keeps_the_times() -> None:
     assert down.tone[0].partials[5][0] == round(800 * r, 3)
     # A note puts tone[1]'s lowest partial on it.
     on = patch.pitch(p, "A3")
-    assert on.tone[0].partials[0][0] == 220.0
+    assert on.tone[0].partials[0][0] == pytest.approx(220.0)
     assert on.tone[0].partials[1][0] == round(304.4 * 220 / 205.3, 3)
     # Leaving the valid domain fails rather than clamping.
     assert any(m.startswith("noise[1].band_hz[2]") for m in problems(patch.pitch, p, "+12"))
@@ -476,6 +511,7 @@ def test_pitch_scales_every_frequency_and_keeps_the_times() -> None:
 
 
 def test_stretch_rescales_after_each_peak_and_the_damper_from_zero() -> None:
+    """Stretch every shape after its peak and the damper from 0 ms, or chosen curves after a time."""
     p = make(**{"damper.amp": amp((100, 1), (110, 0.1), (140, 0))})
     q = patch.stretch(p, "all", 0.8)
     assert q.noise[0].amp == ((0.0, 0.0), (0.3, 1.0), (6.46, 0.45), (24.06, 0.14), (56.06, 0.04), (96.06, 0.0))
@@ -490,36 +526,39 @@ def test_stretch_rescales_after_each_peak_and_the_damper_from_zero() -> None:
 
 
 def test_stretch_failures() -> None:
+    """Refuse a curve the patch lacks, a factor that is not positive, and a stretch past 8 s."""
     p = loads(EXAMPLE)
     assert problems(patch.stretch, p, "noise[3].amp", 2.0)[0].startswith("noise[3].amp: not a curve of this patch")
     for bad in (0.0, -1.0, math.inf, math.nan):
-        with pytest.raises(PatchError):
+        with pytest.raises(PatchError, match="the factor must be a positive number"):
             patch.stretch(p, "all", bad)
-    with pytest.raises(PatchError):
+    with pytest.raises(PatchError, match="--after: must be a time"):
         patch.stretch(p, "all", 2.0, after_ms=-1.0)
     # Stretching past 8 s fails rather than clamping.
     assert any(m.startswith("noise[1].amp[6].ms") for m in problems(patch.stretch, p, "noise[1].amp", 70.0))
 
 
 def test_choke_writes_a_60_db_release() -> None:
+    """Write a choke: 1 at its time, knots every 10 dB over the release, and 0 a step later."""
     p = patch.choke(loads(EXAMPLE), 80.0, release=30.0)
     knots = p.damper.amp
     assert knots[0] == (80.0, 1.0)
-    assert knots[-1] == (115.0, 0.0)
+    assert knots[-1] == (80.0 + 30.0 * 7 / 6, 0.0)
     assert [ms for ms, _ in knots] == [80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0]
     assert [g for _, g in knots[1:-1]] == [0.3162, 0.1, 0.03162, 0.01, 0.003162, 0.001]
-    assert p.length_ms == 115.0
+    assert p.length_ms == knots[-1][0]
     assert p.noise == loads(EXAMPLE).noise
     assert patch.choke(p, 50.0).damper.amp[0] == (50.0, 1.0)  # replaces the damper
     assert patch.choke(p, 50.0).damper.amp[-1] == (round(50 + 40 * 7 / 6, 3), 0.0)
-    with pytest.raises(PatchError):
+    with pytest.raises(PatchError, match="choke: the time must be in ms from 0 on"):
         patch.choke(p, -1.0)
-    with pytest.raises(PatchError):
+    with pytest.raises(PatchError, match="--release: needs at least"):
         patch.choke(p, 10.0, release=0.05)
     assert any(m.startswith("damper.amp") for m in problems(patch.choke, p, 7990.0, 40.0))
 
 
 def test_softer_applies_level_and_contact() -> None:
+    """Strike softer: every level down, rises longer, upper band edges lower, composing up to rounding."""
     p = make_tone()
     q = patch.softer(p, 12.0)
     v = 10 ** (-12 / 20)
@@ -540,7 +579,7 @@ def test_softer_applies_level_and_contact() -> None:
     assert patch.softer(silent, 6.0).noise[1].level_db == -math.inf
     # Composition, up to the decimals written.
     a, b = patch.softer(patch.softer(p, 6.0), 6.0), patch.softer(p, 12.0)
-    for (_, x), (_, y) in zip(a.sources, b.sources):
+    for (_, x), (_, y) in zip(a.sources, b.sources, strict=True):
         assert x.level_db == y.level_db
         assert x.band_hz[1] == pytest.approx(y.band_hz[1], abs=0.11)
-        assert all(abs(m - n) <= 0.002 for (m, _), (n, _) in zip(x.amp, y.amp))
+        assert all(abs(m - n) <= SHIFT for (m, _), (n, _) in zip(x.amp, y.amp, strict=True))
