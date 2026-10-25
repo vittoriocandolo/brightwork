@@ -82,3 +82,6 @@ allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "′"]  # math nota
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '(?m)^# Copyright \(C\) \d{4}(-\d{4})? .+\n# SPDX-License-Identifier: GPL-3\.0-or-later$'  # the copyright line, then the license identifier
+
+[tool.typos.default.extend-words]
+writeable = "writeable"  # NumPy's spelling, in ndarray.flags
