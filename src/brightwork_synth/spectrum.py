@@ -35,8 +35,16 @@ import functools
 import hashlib
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from numpy.typing import ArrayLike, NDArray
+
+type Floats = NDArray[np.float64]
 
 BINS_PER_HZ = 8
 PERIOD = 8  # seconds: one period of every carrier
@@ -55,62 +63,66 @@ MAX_COMPRESSION = 1000.0  # the largest compression or stretch at 20 kHz (plan �
 
 
 def _check(seed: int, take: int | None = None) -> None:
+    """Refuse a seed or a take outside its range."""
     if not 0 <= seed <= MAX_SEED:
-        raise ValueError("seed must be an integer from 0 to 2**63 - 1")
+        msg = "seed must be an integer from 0 to 2**63 - 1"
+        raise ValueError(msg)
     if take is not None and not 1 <= take <= MAX_TAKE:
-        raise ValueError("take must be an integer from 1 to 2**31")
+        msg = "take must be an integer from 1 to 2**31"
+        raise ValueError(msg)
 
 
-def _stream(key: bytes, *ids: int, words: int) -> np.ndarray:
-    """`words` 53-bit unsigned integers from SHAKE-256 over the key and the 8-byte little-endian ids."""
+def _stream(key: bytes, *ids: int, words: int) -> NDArray[np.uint64]:
+    """Return `words` 53-bit unsigned integers from SHAKE-256 over the key and the 8-byte little-endian ids."""
     data = hashlib.shake_256(key + b"".join(i.to_bytes(8, "little") for i in ids)).digest(8 * words)
     return np.frombuffer(data, dtype="<u8") >> np.uint64(11)
 
 
-def _rayleigh(words: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Box–Muller on pairs of 53-bit integers: Rayleigh amplitudes with mean square 2, uniform phases."""
+def _rayleigh(words: NDArray[np.uint64]) -> tuple[Floats, Floats]:
+    """Map pairs of 53-bit integers: Rayleigh amplitudes with mean square 2, uniform phases."""
     pairs = words.reshape(-1, 2)
     u = (pairs[:, 0] + np.uint64(1)).astype(float) * 2.0**-53  # (0, 1]
     v = pairs[:, 1].astype(float) * 2.0**-53  # [0, 1)
     return np.sqrt(-2.0 * np.log(u)), 2.0 * np.pi * v
 
 
-def _readonly(*arrays):
-    for a in arrays:
-        a.flags.writeable = False
-    return arrays
+def _readonly(a: Floats) -> Floats:
+    """Make the array read-only, as a cached value must be, and return it."""
+    a.flags.writeable = False
+    return a
 
 
 @functools.lru_cache(maxsize=8)
-def noise_excitation(seed: int, take: int) -> tuple[np.ndarray, np.ndarray]:
-    """ρ_k and θ_k for bins 1 … 160,000 (read-only)."""
+def noise_excitation(seed: int, take: int) -> tuple[Floats, Floats]:
+    """Return ρ_k and θ_k for bins 1 … 160,000, read-only."""
     _check(seed, take)
-    return _readonly(*_rayleigh(_stream(NOISE_KEY, seed, take, words=2 * BINS)))
+    rho, theta = _rayleigh(_stream(NOISE_KEY, seed, take, words=2 * BINS))
+    return _readonly(rho), _readonly(theta)
 
 
 @functools.lru_cache(maxsize=32)
-def strike_excitation(seed: int, take: int, cells: int) -> tuple[np.ndarray, np.ndarray]:
-    """ρ_i and θ_i for cells 0 … cells − 1 (read-only); a prefix of any longer stream."""
+def strike_excitation(seed: int, take: int, cells: int) -> tuple[Floats, Floats]:
+    """Return ρ_i and θ_i for cells 0 … cells − 1, read-only; a prefix of any longer stream."""
     _check(seed, take)
-    return _readonly(*_rayleigh(_stream(STRIKE_KEY, seed, take, words=2 * cells)))
+    rho, theta = _rayleigh(_stream(STRIKE_KEY, seed, take, words=2 * cells))
+    return _readonly(rho), _readonly(theta)
 
 
 @functools.lru_cache(maxsize=32)
-def mode_offsets(seed: int, cells: int) -> np.ndarray:
-    """u_i in [0, 1) for cells 0 … cells − 1: where each cell's mode lies (read-only)."""
+def mode_offsets(seed: int, cells: int) -> Floats:
+    """Return u_i in [0, 1) for cells 0 … cells − 1, where each cell's mode lies, read-only."""
     _check(seed)
-    (u,) = _readonly(_stream(MODES_KEY, seed, words=cells).astype(float) * 2.0**-53)
-    return u
+    return _readonly(_stream(MODES_KEY, seed, words=cells).astype(float) * 2.0**-53)
 
 
-def free_phases(seed: int, take: int, tone: int, count: int) -> np.ndarray:
-    """Uniform phases for the partials of tone `tone` (numbered from 1)."""
+def free_phases(seed: int, take: int, tone: int, count: int) -> Floats:
+    """Return uniform phases for the partials of tone `tone`, numbered from 1."""
     _check(seed, take)
     return 2.0 * np.pi * _stream(PHASE_KEY, seed, take, tone, words=count).astype(float) * 2.0**-53
 
 
-def dither(seed: int, take: int, count: int) -> np.ndarray:
-    """Triangular (TPDF) dither in LSB for `count` samples, from its own stream.
+def dither(seed: int, take: int, count: int) -> Floats:
+    """Return triangular (TPDF) dither in LSB for `count` samples, from its own stream.
 
     Each value is the difference of two 32-bit uniforms on [0, 1), so it lies in
     (−1, 1) with a triangular density: the dither that makes the first two
@@ -120,18 +132,20 @@ def dither(seed: int, take: int, count: int) -> np.ndarray:
     _check(seed, take)
     data = hashlib.shake_256(DITHER_KEY + seed.to_bytes(8, "little") + take.to_bytes(8, "little")).digest(8 * count)
     u = np.frombuffer(data, dtype="<u4").reshape(count, 2).astype(float) * 2.0**-32
-    return u[:, 0] - u[:, 1]
+    out: Floats = u[:, 0] - u[:, 1]
+    return out
 
 
-def band_power(lo: float, hi: float, f) -> np.ndarray:
-    """|H(f)|² of the band with half-power points lo and hi: second-order Butterworth skirts."""
-    f = np.asarray(f, dtype=float)
-    return 1.0 / ((1.0 + (lo / f) ** 4) * (1.0 + (f / hi) ** 4))
+def band_power(lo: float, hi: float, hz: ArrayLike) -> Floats:
+    """Return |H(f)|² of the band with half-power points lo and hi: second-order Butterworth skirts."""
+    f = np.asarray(hz, dtype=float)
+    out: Floats = 1.0 / ((1.0 + (lo / f) ** 4) * (1.0 + (f / hi) ** 4))
+    return out
 
 
 def grid_bin(hz: float) -> int:
-    """The bin a partial sounds at: the nearest multiple of 1/8 Hz."""
-    return int(round(hz * BINS_PER_HZ))
+    """Return the bin a partial sounds at: the nearest multiple of 1/8 Hz."""
+    return round(hz * BINS_PER_HZ)
 
 
 # Lines.
@@ -145,13 +159,15 @@ class Lines:
     amps: np.ndarray  # complex: |A| e^{iθ}, before γ and the band
 
     @property
-    def hz(self) -> np.ndarray:
-        return self.bins / BINS_PER_HZ
+    def hz(self) -> Floats:
+        """The lines' frequencies."""
+        out: Floats = self.bins / BINS_PER_HZ
+        return out
 
 
 def cells_below_top(spacing: float) -> int:
-    """How many cells of width `spacing` start below 20 kHz."""
-    return int(math.ceil(TOP_HZ / spacing))
+    """Count the cells of width `spacing` that start below 20 kHz."""
+    return math.ceil(TOP_HZ / spacing)
 
 
 def mode_bins(seed: int, spacing: float) -> tuple[np.ndarray, np.ndarray]:
@@ -172,7 +188,7 @@ def mode_bins(seed: int, spacing: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def noise_lines(seed: int, take: int, spacing: float) -> Lines:
-    """The lines of a noise source: every bin when the spacing is 0, else one mode per cell."""
+    """Return the lines of a noise source: every bin when the spacing is 0, else one mode per cell."""
     if spacing == 0:
         rho, theta = noise_excitation(seed, take)
         return Lines(np.arange(1, BINS + 1, dtype=np.int64), rho * np.exp(1j * theta))
@@ -181,8 +197,12 @@ def noise_lines(seed: int, take: int, spacing: float) -> Lines:
     return Lines(bins, rho[cells] * np.exp(1j * theta[cells]))
 
 
-def tone_lines(partials, wave: str, phases: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The lines of a tone, one row per line before coincident lines are added.
+def tone_lines(
+    partials: Iterable[tuple[float, float]],
+    wave: str,
+    phases: Floats,
+) -> tuple[NDArray[np.int64], Floats, Floats]:
+    """Return the lines of a tone, one row per line before coincident lines are added.
 
     partials: (hz, level_db) pairs; phases: φ_i per partial. A sine partial is
     one line; a square partial is its odd harmonics n = 1, 3, 5, … up to 20 kHz
@@ -190,7 +210,7 @@ def tone_lines(partials, wave: str, phases: np.ndarray) -> tuple[np.ndarray, np.
     Returns (bins, real amplitudes, phases).
     """
     bins, amps, args = [], [], []
-    for (hz, level_db), phi in zip(partials, phases):
+    for (hz, level_db), phi in zip(partials, phases, strict=True):
         k = grid_bin(hz)
         a = 10.0 ** (level_db / 20.0)
         n = np.array([1]) if wave == "sine" else np.arange(1, BINS // k + 1, 2)
@@ -212,18 +232,21 @@ class Layout:
     count: int  # n + 1
 
     @property
-    def centres(self) -> np.ndarray:
-        return self.f_ref * 2.0 ** (np.arange(self.count) * self.step)
+    def centres(self) -> Floats:
+        """The sub-bands' centre frequencies."""
+        return np.asarray(self.f_ref * 2.0 ** (np.arange(self.count) * self.step), dtype=np.float64)
 
-    def compression(self, damping: float) -> np.ndarray:
-        return 2.0 ** (np.arange(self.count) * self.step * damping)
+    def compression(self, damping: float) -> Floats:
+        """Return each sub-band's decay compression s_b for this damping."""
+        return np.asarray(2.0 ** (np.arange(self.count) * self.step * damping), dtype=np.float64)
 
-    def stretch(self, bloom: float) -> np.ndarray:
-        return 2.0 ** (np.arange(self.count) * self.step * bloom)
+    def stretch(self, bloom: float) -> Floats:
+        """Return each sub-band's rise stretch r_b for this bloom."""
+        return np.asarray(2.0 ** (np.arange(self.count) * self.step * bloom), dtype=np.float64)
 
-    def windows(self, hz: np.ndarray) -> np.ndarray:
-        """Rows of cos² crossfades in log frequency between neighbouring centres; the rows sum to 1."""
-        hz = np.asarray(hz, dtype=float)
+    def windows(self, frequencies: ArrayLike) -> Floats:
+        """Return rows of cos² crossfades in log frequency between neighbouring centres; the rows sum to 1."""
+        hz = np.asarray(frequencies, dtype=float)
         w = np.zeros((self.count, hz.size))
         if self.count == 1:
             w[0] = 1.0
@@ -245,12 +268,12 @@ def layout(f_ref: float, damping: float, bloom: float) -> Layout:
     if top == 0 or f_ref >= TOP_HZ:
         return Layout(f_ref, 0.0, 1)
     step = 1.0 / (2.0 * top)
-    return Layout(f_ref, step, 1 + int(math.ceil(math.log2(TOP_HZ / f_ref) / step)))
+    return Layout(f_ref, step, 1 + math.ceil(math.log2(TOP_HZ / f_ref) / step))
 
 
 def worst_compression(f_ref: float, damping: float, bloom: float) -> float:
-    """The largest compression or stretch at 20 kHz, which the valid domain bounds."""
-    return (max(TOP_HZ / f_ref, 1.0)) ** max(damping, bloom)
+    """Return the largest compression or stretch at 20 kHz, which the valid domain bounds."""
+    return float(max(TOP_HZ / f_ref, 1.0) ** max(damping, bloom))
 
 
 @dataclass(frozen=True)
@@ -261,8 +284,14 @@ class SubBand:
     amps: np.ndarray  # complex amplitudes A_k, including γ, the band and the window
 
 
-def calibrated(bins: np.ndarray, amps: np.ndarray, band: tuple[float, float], random: bool) -> np.ndarray:
-    """The lines weighted by the band and scaled by γ so the mean square is ½.
+def calibrated(
+    bins: NDArray[np.int64],
+    amps: NDArray[np.complex128],
+    band: tuple[float, float],
+    *,
+    random: bool,
+) -> NDArray[np.complex128]:
+    """Return the lines weighted by the band and scaled by γ so the mean square is ½.
 
     Random lines (noise and modes) have E[ρ²] = 2, so a line's expected mean
     square is |H|² and γ²Σ|H|² = ½: the mean square over takes is exactly ½.
@@ -270,16 +299,14 @@ def calibrated(bins: np.ndarray, amps: np.ndarray, band: tuple[float, float], ra
     coincident lines separately.
     """
     gain = np.sqrt(band_power(band[0], band[1], bins / BINS_PER_HZ))
-    if random:
-        total = math.fsum((gain**2).tolist())
-    else:
-        total = math.fsum(((np.abs(amps) * gain) ** 2).tolist()) / 2
+    total = math.fsum((gain**2).tolist()) if random else math.fsum(((np.abs(amps) * gain) ** 2).tolist()) / 2
     gamma = math.sqrt(0.5 / total) if total > 0 else 0.0
-    return gamma * gain * amps
+    out: NDArray[np.complex128] = gamma * gain * amps
+    return out
 
 
 def split(bins: np.ndarray, amps: np.ndarray, lay: Layout) -> list[SubBand]:
-    """The lines of each sub-band; a line between two centres is shared by their windows."""
+    """Return the lines of each sub-band; a line between two centres is shared by their windows."""
     if lay.count == 1:
         return [SubBand(bins, amps)]
     w = lay.windows(bins / BINS_PER_HZ)
@@ -291,7 +318,7 @@ def split(bins: np.ndarray, amps: np.ndarray, lay: Layout) -> list[SubBand]:
 
 
 def merged(bins: np.ndarray, amps: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Coincident lines added: unique ascending bins with summed complex amplitudes."""
+    """Add coincident lines: unique ascending bins with summed complex amplitudes."""
     unique, inverse = np.unique(bins, return_inverse=True)
     total = np.zeros(unique.size, dtype=complex)
     np.add.at(total, inverse, amps)

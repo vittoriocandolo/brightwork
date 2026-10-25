@@ -80,7 +80,7 @@ def x_exact(p, t=None, n=None, rate=RATE):
 def internal_x(p, count=None):
     v = V.voice(p)
     count = V.sample_count(v.t_src, RATE) if count is None else count
-    return V.synthesize_x(v, RATE, count, IP, V.tables(v, IP.rate))
+    return V.synthesize_x(V.Model(v, IP, V.tables(v, IP.rate)), RATE, count)
 
 
 # The saturator.
@@ -107,10 +107,16 @@ def test_slope_and_curvature_are_the_derivatives():
         x = np.linspace(-1.5, 1.5, 301)
         h = 1e-6
         np.testing.assert_allclose(
-            V.slope(a, x), (V.saturate(a, x + h) - V.saturate(a, x - h)) / (2 * h), rtol=1e-7, atol=1e-7
+            V.slope(a, x),
+            (V.saturate(a, x + h) - V.saturate(a, x - h)) / (2 * h),
+            rtol=1e-7,
+            atol=1e-7,
         )
         np.testing.assert_allclose(
-            V.curvature(a, x), (V.slope(a, x + h) - V.slope(a, x - h)) / (2 * h), rtol=1e-6, atol=1e-5
+            V.curvature(a, x),
+            (V.slope(a, x + h) - V.slope(a, x - h)) / (2 * h),
+            rtol=1e-6,
+            atol=1e-5,
         )
 
 
@@ -158,9 +164,9 @@ def test_blocks_threads_and_longer_renders_never_change_samples():
     v = V.voice(p)
     tabs = V.tables(v, IP.rate)
     count = V.sample_count(v.t_src, RATE)
-    whole = V.synthesize_x(v, RATE, count, IP, tabs)
-    assert np.array_equal(V.synthesize_x(v, RATE, count, IP, tabs, workers=1), whole)
-    short = V.synthesize_x(v, RATE, count // 3, IP, tabs, workers=3)
+    whole = V.synthesize_x(V.Model(v, IP, tabs), RATE, count)
+    assert np.array_equal(V.synthesize_x(V.Model(v, IP, tabs), RATE, count, workers=1), whole)
+    short = V.synthesize_x(V.Model(v, IP, tabs), RATE, count // 3, workers=3)
     assert np.array_equal(short, whole[: count // 3])
 
 
@@ -188,7 +194,8 @@ def test_takes_keep_struck_tones_and_redraw_the_rest():
 
 
 @pytest.mark.parametrize(
-    "damping, bloom, b", [(0.5, 0.0, 1), (0.5, 0.0, 2), (1.0, 0.0, 2), (2.0, 0.5, 4), (2.0, 0.5, 8)]
+    "damping, bloom, b",
+    [(0.5, 0.0, 1), (0.5, 0.0, 2), (1.0, 0.0, 2), (2.0, 0.5, 4), (2.0, 0.5, 8)],
 )
 def test_each_sub_band_plays_the_shape_on_its_time_map(damping, bloom, b):
     # A sine at a sub-band's centre is in that sub-band alone, so its envelope is the shape on the sub-band's time
@@ -356,7 +363,7 @@ def test_knee_record_is_exact_at_every_drive(edits):
             [V.drive_alpha(db) for db in np.arange(0.5, 48.01, 0.5)],
             slew.knees.drops(),
             np.nextafter(slew.knees.drops(), np.inf),
-        ]
+        ],
     )
     for a in alphas:
         assert slew.knee(a) == pytest.approx(brute_knee(x, a), rel=1e-15, abs=0)
@@ -454,7 +461,9 @@ def test_kink_bound_form():
     assert sum(c for _, c in V.kink_knots(k, alpha, RATE, 24000.0)) == pytest.approx(total, rel=1e-12)
     alphas = np.array([0.0, 0.5, alpha, 30.0])
     np.testing.assert_allclose(
-        V.kink_bounds(k, alphas, RATE, 24000.0), [V.kink_bound(k, a, RATE, 24000.0) for a in alphas], rtol=1e-12
+        V.kink_bounds(k, alphas, RATE, 24000.0),
+        [V.kink_bound(k, a, RATE, 24000.0) for a in alphas],
+        rtol=1e-12,
     )
     w2, w3 = V._weights(RATE, 24000.0)
     assert w2 == pytest.approx(1.01 * 4 * 1.2020569031595942 * 24000 / (2 * np.pi * RATE) ** 3, rel=1e-15)

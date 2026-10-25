@@ -36,15 +36,22 @@ import math
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, override
 
 import numpy as np
 from scipy.fft import irfft, next_fast_len, rfft
 from scipy.signal import upfirdn
 
 from . import carrier
-from .patch import Patch
-from .render import FAMILY, K, Domain, decimator, domain, rates, synthesize, take_numbers
-from .voice import Voice, _gate, sample_count, saturate, tables, voice
+from .render import FAMILY, Domain, K, decimator, domain, rates, synthesize, take_numbers
+from .voice import Model, _gate, sample_count, saturate, tables, voice
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from .patch import Patch
+
+type Floats = NDArray[np.float64]
 
 REFERENCE = 128  # the reference rate, in multiples of the base rate
 CHECK = 256  # its convergence check
@@ -58,21 +65,24 @@ MARGIN_DB = 20.0  # references must agree this far below the limits
 
 
 @functools.lru_cache(maxsize=8)
-def _mask(length: int, hi_rate: int, rate: int) -> np.ndarray:
+def _mask(length: int, hi_rate: int, rate: int) -> Floats:
+    """Return the zero-phase mask of a segment at hi_rate: flat to 0.4 · rate, then a raised cosine to 0 at 0.5."""
     f = np.arange(length // 2 + 1) * (hi_rate / length)
     edge = np.clip((f - 0.4 * rate) / (0.1 * rate), 0.0, 1.0)
-    return 0.5 * (1.0 + np.cos(np.pi * edge))
+    out: Floats = 0.5 * (1.0 + np.cos(np.pi * edge))
+    return out
 
 
-def _carrier(tab: np.ndarray, ip: carrier.Interpolator, a: int, b: int) -> np.ndarray:
-    """Internal samples a ≤ n < b of a carrier, at any a and b."""
+def _carrier(tab: Floats, ip: carrier.Interpolator, a: int, b: int) -> Floats:
+    """Return internal samples a ≤ n < b of a carrier, at any a and b."""
     a0 = a // ip.up * ip.up
     count = -(-(b - a0) // ip.up) * ip.up
     return carrier.block(tab, ip, a0, count)[a - a0 : b - a0]
 
 
-def x_range(v: Voice, rate: int, ip: carrier.Interpolator, tabs, n0: int, n1: int, count: int) -> np.ndarray:
-    """x(n / rate) for n0 ≤ n < n1, and 0 outside 0 ≤ n < count: the same model as the shipping synthesis."""
+def x_range(model: Model, rate: int, n0: int, n1: int, count: int) -> Floats:
+    """Return x(n / rate) for n0 ≤ n < n1, and 0 outside 0 ≤ n < count: the same model as the shipping synthesis."""
+    v, ip, tabs = model
     x = np.zeros(n1 - n0)
     lo, hi = max(n0, 0), min(n1, count)
     if lo >= hi:
@@ -80,7 +90,7 @@ def x_range(v: Voice, rate: int, ip: carrier.Interpolator, tabs, n0: int, n1: in
     t = np.arange(lo, hi) / rate
     for s in v.audible:
         acc = np.zeros(hi - lo)
-        for sb, tab in zip(s.subbands, tabs[s.path]):
+        for sb, tab in zip(s.subbands, tabs[s.path], strict=True):
             a = max(lo, math.ceil(float(sb.env.t[0]) * rate) - 1)
             b = min(hi, math.floor(float(sb.env.t[-1]) * rate) + 2)
             if a < b:
@@ -92,10 +102,10 @@ def x_range(v: Voice, rate: int, ip: carrier.Interpolator, tabs, n0: int, n1: in
     return x
 
 
-def band_limited(
-    v: Voice, rate: int, ip: carrier.Interpolator, tabs, n_start: int, n_stop: int, m: int, workers: int = 1
-) -> np.ndarray:
-    """ŷ_F[n] for n_start ≤ n < n_stop: y rendered at m·F, masked above F/2, every m-th sample."""
+def band_limited(model: Model, rate: int, samples: range, m: int, workers: int = 1) -> Floats:
+    """Return ŷ_F[n] for the samples n: y rendered at m·F, masked above F/2, every m-th sample."""
+    n_start, n_stop = samples.start, samples.stop
+    v = model.voice
     hi = m * rate
     count = sample_count(v.t_src, hi)
     out = np.empty(n_stop - n_start)
@@ -104,7 +114,7 @@ def band_limited(
         b = min(a + SEGMENT, n_stop)
         length = next_fast_len((b - a + 2 * GUARD) * m, real=True)
         start = (a - GUARD) * m
-        y = saturate(v.alpha, x_range(v, hi, ip, tabs, start, start + length, count))
+        y = saturate(v.alpha, x_range(model, hi, start, start + length, count))
         z = irfft(rfft(y) * _mask(length, hi, rate), length)
         out[a - n_start : b - n_start] = z[GUARD * m : (GUARD + b - a) * m : m]
 
@@ -115,25 +125,33 @@ def band_limited(
 
 @dataclass(frozen=True)
 class Reference:
-    out: np.ndarray  # D(ŷ_F), aligned with and as long as the shipping output
-    internal: np.ndarray  # ŷ_F from −GUARD to N + GUARD
+    """A reference render: its output, and the band-limited internal signal it was decimated from."""
+
+    out: Floats  # D(ŷ_F), aligned with and as long as the shipping output
+    internal: Floats  # ŷ_F from −GUARD to N + GUARD
 
 
 def reference(
-    p: Patch, multiple: int = REFERENCE, *, k: int = K, taps: np.ndarray | None = None, workers: int | None = None
+    p: Patch,
+    multiple: int = REFERENCE,
+    *,
+    k: int = K,
+    taps: Floats | None = None,
+    workers: int | None = None,
 ) -> Reference:
-    """The reference output of p's take at `multiple` × base."""
+    """Render the reference output of p's take at `multiple` × base."""
     v = voice(p)
     rate, factor = rates(p.output.sample_rate, k)
     if multiple % k:
-        raise ValueError(f"a reference at {multiple}× base needs K dividing it, not {k}")
+        msg = f"a reference at {multiple}× base needs K dividing it, not {k}"
+        raise ValueError(msg)
     base = FAMILY[p.output.sample_rate]
     if taps is None:
         taps = decimator(base, k).taps
     ip = carrier.interpolator(base, multiple // 2)
     tabs = tables(v, ip.rate)
     n = sample_count(v.t_src, rate)
-    z = band_limited(v, rate, ip, tabs, -GUARD, n + GUARD, multiple // k, workers or os.cpu_count() or 1)
+    z = band_limited(Model(v, ip, tabs), rate, range(-GUARD, n + GUARD), multiple // k, workers or os.cpu_count() or 1)
     first = GUARD // factor  # GUARD is a multiple of every factor, so the output grid stays aligned
     out = upfirdn(taps, z, down=factor)[first : first + (n + taps.size - 2) // factor + 1]
     return Reference(out, z)
@@ -141,6 +159,8 @@ def reference(
 
 @dataclass(frozen=True)
 class Errors:
+    """How far a render is from its reference: relative RMS and peak errors in dB, the largest error and the peak."""
+
     rel_db: float
     max_db: float
     max_abs: float
@@ -148,42 +168,48 @@ class Errors:
 
     @property
     def near_silent(self) -> bool:
+        """Whether the reference is so quiet that the absolute bound applies instead."""
         return self.peak < NEAR_SILENT
 
     def passes(self, limit_db: float = LIMIT_DB, abs_limit: float = ABS_LIMIT) -> bool:
+        """Tell whether the errors are within the limits: relative, or absolute when near silent."""
         if self.near_silent:
             return self.max_abs <= abs_limit
         return self.rel_db <= limit_db and self.max_db <= limit_db
 
 
 def _db(x: float) -> float:
+    """Return x in decibels, -inf for 0."""
     return 20 * math.log10(x) if x > 0 else -math.inf
 
 
-def compare(test: np.ndarray, ref: np.ndarray) -> Errors:
+def compare(test: Floats, ref: Floats) -> Errors:
+    """Measure how far `test` is from `ref`."""
     err = test - ref
     peak = float(np.max(np.abs(ref), initial=0.0))
     max_abs = float(np.max(np.abs(err), initial=0.0))
     norm = float(np.linalg.norm(ref))
     return Errors(
-        _db(np.linalg.norm(err) / norm) if norm else -math.inf,
+        _db(float(np.linalg.norm(err)) / norm) if norm else -math.inf,
         _db(max_abs / peak) if peak else -math.inf,
         max_abs,
         peak,
     )
 
 
-def leakage_db(internal: np.ndarray, out: np.ndarray, rate: int, base: int, stopband_db: float) -> float:
-    """Bound on the decimator's own leakage, relative to the output: stopband gain × out-of-band norm."""
-    X = np.fft.rfft(internal)
-    f = np.arange(X.size) * rate / internal.size
-    oob = math.sqrt(2 * float(np.sum(np.abs(X[f >= base / 2]) ** 2)) / internal.size)
+def leakage_db(internal: Floats, out: Floats, rate: int, base: int, stopband_db: float) -> float:
+    """Bound the decimator's own leakage, relative to the output: stopband gain × out-of-band norm."""
+    spectrum = np.fft.rfft(internal)
+    f = np.arange(spectrum.size) * rate / internal.size
+    oob = math.sqrt(2 * float(np.sum(np.abs(spectrum[f >= base / 2]) ** 2)) / internal.size)
     norm = float(np.linalg.norm(out))
     return _db(10 ** (-stopband_db / 20) * oob / norm) if norm else -math.inf
 
 
 @dataclass(frozen=True)
 class Verification:
+    """One take's verification: its error against the reference, the reference's convergence, and its domain."""
+
     take: int
     error: Errors  # shipping against the reference
     convergence: Errors  # the reference against its check
@@ -194,13 +220,16 @@ class Verification:
 
     @property
     def converged(self) -> bool:
+        """Whether the reference agrees with its check far enough below the limits to count."""
         return self.convergence.passes(LIMIT_DB - MARGIN_DB, ABS_LIMIT * 10 ** (-MARGIN_DB / 20))
 
     @property
     def passed(self) -> bool:
+        """Whether the reference counts and the render is within the limits of it."""
         return self.converged and self.error.passes()
 
     def lines(self) -> list[str]:
+        """Return the report's lines."""
         e, c = self.error, self.convergence
         if e.near_silent:
             error = f"max error {e.max_abs:.2e} (near-silent: limit {ABS_LIMIT:g})"
@@ -220,31 +249,25 @@ class Verification:
             f"result      {verdict}",
         ]
 
+    @override
     def __str__(self) -> str:
+        """Format the report."""
         return "\n".join(self.lines())
 
 
-def verify_take(
-    p: Patch,
-    *,
-    k: int = K,
-    taps: np.ndarray | None = None,
-    multiple: int = REFERENCE,
-    check: int = CHECK,
-    workers: int | None = None,
-) -> Verification:
+def verify_take(p: Patch, *, k: int = K, taps: Floats | None = None, workers: int | None = None) -> Verification:
     """Compare the shipping render of p's take with its reference (plan §8.2)."""
     base = FAMILY[p.output.sample_rate]
     stopband = decimator(base, k).stopband_db if taps is None else 110.0
     ship = synthesize(p, k=k, taps=taps)
-    ref = reference(p, multiple, k=k, taps=taps, workers=workers)
-    finer = reference(p, check, k=k, taps=taps, workers=workers)
+    ref = reference(p, REFERENCE, k=k, taps=taps, workers=workers)
+    finer = reference(p, CHECK, k=k, taps=taps, workers=workers)
     return Verification(
         take=p.take,
         error=compare(ship.out, ref.out),
         convergence=compare(ref.out, finer.out),
-        reference_hz=multiple * base,
-        check_hz=check * base,
+        reference_hz=REFERENCE * base,
+        check_hz=CHECK * base,
         leakage_db=leakage_db(finer.internal, finer.out, ship.rate, base, stopband),
         domain=domain(ship),
     )
@@ -252,13 +275,18 @@ def verify_take(
 
 @dataclass(frozen=True)
 class Verifications:
+    """The verifications of a set of takes."""
+
     takes: tuple[Verification, ...]
 
     @property
     def passed(self) -> bool:
+        """Whether every take passed."""
         return all(v.passed for v in self.takes)
 
+    @override
     def __str__(self) -> str:
+        """Format the report, take by take when there are several."""
         if len(self.takes) == 1:
             return str(self.takes[0])
         lines = []

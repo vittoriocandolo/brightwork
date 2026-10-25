@@ -67,7 +67,8 @@ def test_the_largest_window_counts_every_position():
     assert momentary_max(burst, rate) == pytest.approx(steady + 10 * math.log10(0.25), abs=0.02)
     # A burst at the very end of a file reads the same: windows run past the end.
     assert momentary_max(np.concatenate((np.zeros(rate), tone[: rate // 10])), rate) == pytest.approx(
-        momentary_max(burst, rate), abs=1e-9
+        momentary_max(burst, rate),
+        abs=1e-9,
     )
     assert momentary_max(np.zeros(1000), rate) == -math.inf
 

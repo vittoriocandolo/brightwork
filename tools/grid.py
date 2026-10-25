@@ -354,7 +354,7 @@ def random_edits(rng) -> dict:
         chatter = float(rng.choice([0.0, rng.uniform(0, 1)], p=[0.7, 0.3]))
         span = float(10 ** rng.uniform(0.7, 3.4))
         sources.append(
-            noise(level(), (lo, hi), spacing, random_shape(rng, span), damping, bloom, chatter, rng.uniform(10, 4000))
+            noise(level(), (lo, hi), spacing, random_shape(rng, span), damping, bloom, chatter, rng.uniform(10, 4000)),
         )
     tones = []
     for _ in range(int(rng.choice([0, 0, 1, 2]))):
@@ -378,7 +378,7 @@ def random_edits(rng) -> dict:
                 damping,
                 bloom,
                 levels,
-            )
+            ),
         )
     if not sources and not tones:
         sources.append(noise(0.0, band(), 14.0, PLATES))
@@ -474,7 +474,7 @@ def run(args) -> None:
     if out.exists():
         # Rows whose fixture has changed since, such as a revoiced reference's ladder, are dropped and run again.
         current = {(fam, name): json.dumps(edits) for fam, name, edits in fixtures()}
-        rows = list(csv.DictReader(open(out)))
+        rows = list(csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines()))
         kept = [r for r in rows if current.get((r["family"], r["name"])) == r["edits"]]
         if len(kept) < len(rows):
             print(f"dropping {len(rows) - len(kept)} rows whose fixtures changed", flush=True)
@@ -506,7 +506,7 @@ def run(args) -> None:
 
 
 def load(path, saturation: float = SATURATION) -> list[dict]:
-    rows = list(csv.DictReader(open(path)))
+    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in FIELDS[2:-1]:
             r[key] = float(r[key]) if r.get(key) not in (None, "") else math.nan
@@ -551,7 +551,7 @@ def analyze(args) -> None:
         print(f"  pass {sum(r['pass'] for r in rows)}, converged references {len(conv)}")
         print(
             f"  undriven fixtures {len(linear)}: pass {sum(r['pass'] for r in linear)}; the kink bound is exceeded by "
-            f"the measured error in {len(misses)}, and within 6 dB of it in {len(thin)}"
+            f"the measured error in {len(misses)}, and within 6 dB of it in {len(thin)}",
         )
         for r in misses + thin:
             print(f"    {r['family']}/{r['name']}: measured {r['max_abs']:.3g}, bound {r['kink']:.3g}")
@@ -573,7 +573,7 @@ def analyze(args) -> None:
             if m["max_abs"] > 0:
                 print(
                     f"  least conservative inside: predicted {20 * math.log10(m['predicted'] / m['max_abs']):.1f} dB "
-                    f"above measured ({m['family']}/{m['name']})"
+                    f"above measured ({m['family']}/{m['name']})",
                 )
         caution = sum(1 for r in rows if not r["inside"] and r["pass"] and r["converged"])
         print(f"  outside but passing (the rule's caution): {caution}")

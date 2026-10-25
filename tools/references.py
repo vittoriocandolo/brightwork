@@ -27,10 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from brightwork_synth.cli import REFERENCES, reference_text  # noqa: E402
-from brightwork_synth.loudness import momentary_max  # noqa: E402
-from brightwork_synth.patch import loads  # noqa: E402
-from brightwork_synth.render import cause_of, db, domain, drive_headroom, output_stage, render_takes, synthesize  # noqa: E402
+from brightwork_synth.cli import REFERENCES, reference_text
+from brightwork_synth.loudness import momentary_max
+from brightwork_synth.patch import loads
+from brightwork_synth.render import cause_of, db, domain, drive_headroom, output_stage, render_takes, synthesize
 
 
 def take_row(args) -> dict:
@@ -89,12 +89,12 @@ def main(argv=None) -> int:
     print(f"seeds 1–{args.seeds} × takes 1–{args.takes}")
     print(
         f"{'reference':<9s} {'LUFS':>6s} {'mean':>6s} {'spread':>7s} {'max peak':>9s} {'inside':>7s} "
-        f"{'min margin':>11s} {'min headroom':>13s}"
+        f"{'min margin':>11s} {'min headroom':>13s}",
     )
     for r in results:
         print(
             f"{r['name']:<9s} {r['lufs']:6.1f} {r['mean']:6.1f} {r['spread']:5.2f}dB {r['peak']:7.2f}dB "
-            f"{str(r['inside']):>7s} {r['margin']:9.1f}dB {r['headroom']:11.1f}dB"
+            f"{r['inside']!s:>7s} {r['margin']:9.1f}dB {r['headroom']:11.1f}dB",
         )
     means = [r["mean"] for r in results]
     # A set whose takes spread over 1 dB must be flagged by the report, and level matching must bring it within 1 dB.

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 grid = pytest.importorskip("grid")
 
-from brightwork_synth.render import K, QUIET, SATURATION  # noqa: E402
+from brightwork_synth.render import QUIET, SATURATION, K  # noqa: E402
 
 FAMILIES = {
     "noise",
@@ -58,7 +58,7 @@ def test_the_grid_covers_the_corners(rows):
     assert sum(r["family"] == "random" for r in rows) >= 200
     seeds = [r for r in rows if r["family"] == "seeds"]
     assert {(int(r["seed"]), int(r["take"])) for r in seeds} == {(s, t) for s in range(1, 5) for t in range(1, 5)} - {
-        (1, 1)
+        (1, 1),
     }
     assert max(r["length_ms"] for r in rows) == 8000.0
 

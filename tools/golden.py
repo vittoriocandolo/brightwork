@@ -21,8 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from brightwork_synth.patch import loads  # noqa: E402
-from brightwork_synth.render import export, render_takes  # noqa: E402
+from brightwork_synth.patch import loads
+from brightwork_synth.render import export, render_takes
 
 GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "golden"
 SETS = {  # name: (files, stereo)

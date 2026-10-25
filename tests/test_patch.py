@@ -85,7 +85,7 @@ def random_patch(rng) -> P.Patch:
                 band_hz=(lo, float(rng.uniform(lo + 1, 20000))),
                 spacing_hz=float(rng.choice([0.0, rng.uniform(1, 200)])),
                 **common(lo, lo),
-            )
+            ),
         )
     tones = []
     for _ in range(int(rng.integers(0 if noise else 1, 3))):
@@ -104,7 +104,7 @@ def random_patch(rng) -> P.Patch:
                 partials=tuple(zip(hz, levels)),
                 band_hz=(lo, float(rng.uniform(lo + 1, 20000))),
                 **common(lo, max(lo, hz[0])),
-            )
+            ),
         )
     damper = ()
     if rng.random() < 0.5:
@@ -166,7 +166,7 @@ def test_schema_versions(example_dict):
 
 def test_integers_accepted_for_floats_but_not_booleans():
     p = make(
-        **{"noise[1].band_hz": [6000, 16000], "drive.db": 0, "noise[1].spacing_hz": 14, "noise[1].chatter_hz": 220}
+        **{"noise[1].band_hz": [6000, 16000], "drive.db": 0, "noise[1].spacing_hz": 14, "noise[1].chatter_hz": 220},
     )
     assert all(type(x) is float for x in p.noise[0].band_hz)
     assert type(p.drive.db) is float and type(p.noise[0].spacing_hz) is float
@@ -247,15 +247,15 @@ def test_knot_times():
 
 def test_amplitude_shapes():
     assert "noise[1].amp[1].gain: an amplitude shape must start at 0" in reject(
-        **{"noise[1].amp": amp((0, 0.1), (1, 1), (2, 0))}
+        **{"noise[1].amp": amp((0, 0.1), (1, 1), (2, 0))},
     )
     assert "noise[1].amp[3].gain: an amplitude shape must end at 0" in reject(
-        **{"noise[1].amp": amp((0, 0), (1, 1), (2, 0.1))}
+        **{"noise[1].amp": amp((0, 0), (1, 1), (2, 0.1))},
     )
     found = reject(**{"noise[2].amp": amp((0, 0), (1, 0.9999999), (2, 0))})
     assert "noise[2].amp: the highest gain must be exactly 1, found 0.9999999" in found
     assert "noise[1].amp[2].gain: 1.5 is outside 0 … 1" in reject(
-        **{"noise[1].amp": amp((0, 0), (1, 1.5), (2, 1), (3, 0))}
+        **{"noise[1].amp": amp((0, 0), (1, 1.5), (2, 1), (3, 0))},
     )
     # Delayed shapes are allowed: the first knot need not be at 0 ms.
     assert make(**{"noise[2].amp": amp((5, 0), (6, 1), (20, 0))}).noise[1].amp[0] == (5.0, 0.0)
@@ -277,7 +277,8 @@ def test_noise_sources(example_dict):
     four = dict(example_dict, noise=example_dict["noise"] * 2)
     assert len(from_dict(four).noise) == 4
     assert "noise: at most 4 noise sources, found 5" in problems(
-        from_dict, dict(example_dict, noise=example_dict["noise"] * 2 + example_dict["noise"][:1])
+        from_dict,
+        dict(example_dict, noise=example_dict["noise"] * 2 + example_dict["noise"][:1]),
     )
     assert any(
         m.startswith("noise: expected an array of tables ([[noise]])")
@@ -375,7 +376,7 @@ def test_all_problems_are_reported_together():
             "output.mode": "loud",
             "noise[2].chatter": 2.0,
             "noise[1].amp": amp((0, 0), (1, 0.5), (2, 0)),
-        }
+        },
     )
     assert len(found) == 5
     # Problems of structure and of value come together too: an unknown field, a seed and a damping.

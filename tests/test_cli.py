@@ -98,7 +98,7 @@ def test_render_writes_pcm(capsys, tmp_path):
         assert code == 2 and "float32 only" in err
     loud = tmp_path / "loud.toml"
     loud.write_text(
-        EXAMPLE.replace('"float32"     #', '"pcm24"       #').replace("db          = -6.0", "db          = 12.0")
+        EXAMPLE.replace('"float32"     #', '"pcm24"       #').replace("db          = -6.0", "db          = 12.0"),
     )
     code, _, err = run(capsys, "render", loud, "--out", tmp_path / "loud.wav")
     assert code == 1 and "not written" in err and "ceiling" in err and not (tmp_path / "loud.wav").exists()

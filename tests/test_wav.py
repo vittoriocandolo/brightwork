@@ -6,6 +6,7 @@ import json
 import math
 import struct
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from brightwork_synth.patch import dumps, loads
 
 def walk(path):
     """An independent chunk walker: (id, size, payload, offset) in file order."""
-    data = open(path, "rb").read()
+    data = Path(path).read_bytes()
     assert data[:4] == b"RIFF" and data[8:12] == b"WAVE"
     assert struct.unpack_from("<I", data, 4)[0] == len(data) - 8
     pos, out = 12, []
@@ -168,13 +169,13 @@ def test_riff_padding(tmp_path):
     for text in ("x", "xy", "π"):
         path = tmp_path / "pad.wav"
         samples = np.linspace(-1, 1, 7, dtype=np.float32)
-        wav.write(path, samples, 44100, meta={"patch": text})
+        wav.write(path, samples, wav.Format(44100), meta={"patch": text})
         chunks = walk(path)
         private = next(c for c in chunks if c[0] == b"cymb")
         data = next(c for c in chunks if c[0] == b"data")
         assert data[3] % 2 == 0
         if private[1] % 2:
-            raw = open(path, "rb").read()
+            raw = Path(path).read_bytes()
             assert raw[private[3] + 8 + private[1]] == 0
         assert np.array_equal(soundfile.read(path, dtype="float32")[0], samples)
         assert wav.read(path).meta == {"patch": text}
@@ -200,13 +201,13 @@ def test_reads_beds_and_samples_but_rejects_other_formats(tmp_path):
             wav.read(path)
         assert b"fmt " in wav.chunks(path)
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.zeros(4), 48000)  # float64 is not a format
+        wav.write(tmp_path / "x.wav", np.zeros(4), wav.Format(48000))  # float64 is not a format
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.zeros(4, dtype=np.int32), 48000, bits=20)
+        wav.write(tmp_path / "x.wav", np.zeros(4, dtype=np.int32), wav.Format(48000, 20))
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.array([2**15], dtype=np.int32), 48000, bits=16)  # out of range
+        wav.write(tmp_path / "x.wav", np.array([2**15], dtype=np.int32), wav.Format(48000, 16))  # out of range
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.zeros((4, 3), dtype=np.float32), 48000)  # mono or stereo only
+        wav.write(tmp_path / "x.wav", np.zeros((4, 3), dtype=np.float32), wav.Format(48000))  # mono or stereo only
 
 
 def test_every_rate_writes_a_valid_file(tmp_path):
@@ -251,7 +252,7 @@ def test_pcm_exports_read_back_exactly(tmp_path, fmt, bits, subtype):
     }
     # The same patch writes the same bytes again.
     export(tmp_path / "again.wav", p)
-    assert open(path, "rb").read() == open(tmp_path / "again.wav", "rb").read()
+    assert Path(path).read_bytes() == (tmp_path / "again.wav").read_bytes()
 
 
 def test_stereo_pcm_dithers_each_channel_with_its_own_take(tmp_path):
@@ -276,7 +277,7 @@ def test_exact_zeros_stay_zero():
 def test_24_bit_packing_round_trips(tmp_path):
     values = np.array([-(2**23), 2**23 - 1, -1, 0, 1, 12345, -54321, 2**22], dtype=np.int32)
     path = tmp_path / "pack.wav"
-    wav.write(path, values, 48000, bits=24)
+    wav.write(path, values, wav.Format(48000, 24))
     assert np.array_equal(wav.read(path).samples, values)
     assert np.array_equal(soundfile.read(path, dtype="int32")[0] >> 8, values)
 
@@ -307,7 +308,7 @@ def test_pcm_keeps_room_for_dither():
         assert q.max() <= 2 ** (bits - 1) - 1 and q.min() >= -(2 ** (bits - 1))
     # Float keeps its full-scale target; a gain-mode render between the ceiling and full scale is over for PCM.
     assert np.max(
-        np.abs(R.render(make(**{"output.mode": "peak", "output.db": 0.0, "drive.db": 12.0}))[0])
+        np.abs(R.render(make(**{"output.mode": "peak", "output.db": 0.0, "drive.db": 12.0}))[0]),
     ) == pytest.approx(1.0)
     unity = np.max(np.abs(R.synthesize(make()).out))
     gain_db = 20 * math.log10((1 - 2**-15) / unity)  # half an LSB below full scale: fine as float, over as pcm16

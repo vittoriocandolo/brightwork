@@ -29,7 +29,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from brightwork_synth import carrier, spectrum  # noqa: E402
+from brightwork_synth import carrier, spectrum
 
 BASES = (44100, 48000)
 SHIPPED_K = (16, 32, 64)
@@ -65,7 +65,7 @@ def accuracy(ip: carrier.Interpolator, seed: int = 1) -> float:
         tab = carrier.table(lines.bins, amps, ip.rate)
         n = np.sort(rng.integers(0, spectrum.PERIOD * rate, INSTANTS))
         got = np.array(
-            [carrier.block(tab, ip, int(i) // carrier.BLOCK * carrier.BLOCK)[int(i) % carrier.BLOCK] for i in n]
+            [carrier.block(tab, ip, int(i) // carrier.BLOCK * carrier.BLOCK)[int(i) % carrier.BLOCK] for i in n],
         )
         rms = math.sqrt(0.5 * float(np.sum(np.abs(amps) ** 2)))
         worst = max(worst, float(np.max(np.abs(got - exact(lines.bins, amps, n, rate)))) / rms)

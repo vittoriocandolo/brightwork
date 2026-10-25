@@ -31,7 +31,7 @@ OFFSET = -0.691
 
 
 def k_weighting(rate: int) -> np.ndarray:
-    """The two K-weighting biquads at `rate`, as second-order sections."""
+    """Design the two K-weighting biquads at `rate`, as second-order sections."""
     k = math.tan(math.pi * SHELF_HZ / rate)
     vh = 10.0 ** (SHELF_DB / 20.0)
     vb = vh**SHELF_VB
@@ -51,7 +51,7 @@ def k_weighting(rate: int) -> np.ndarray:
 
 
 def momentary_max(x: np.ndarray, rate: int) -> float:
-    """The largest 400 ms momentary loudness in LUFS, over every window position; −inf for silence.
+    """Measure the largest 400 ms momentary loudness in LUFS, over every window position; −inf for silence.
 
     `x` is mono, or (frames, channels).
 
@@ -69,6 +69,6 @@ def momentary_max(x: np.ndarray, rate: int) -> float:
 
 
 def true_peak(audio: np.ndarray) -> float:
-    """A 4× oversampled peak estimate (information only)."""
+    """Estimate the true peak by 4× oversampling, for information only."""
     x = np.concatenate((np.asarray(audio, dtype=float), np.zeros(32)))
     return max(float(np.max(np.abs(resample_poly(x, 4, 1)))), float(np.max(np.abs(audio), initial=0.0)))

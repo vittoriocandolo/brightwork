@@ -53,7 +53,7 @@ def ladder(name, steps):
 def hats():
     """A hi-hat kit: three closed layers, a pedal, and two open layers choked by both."""
     groups = [(42, ladder("closed", (0, 8, 16))), (44, ladder("pedal", (0,))), (46, ladder("open", (0, 12)))]
-    return K.build(groups, takes=2, chokes=[(46, (42, 44))])
+    return K.build(groups, K.Options(takes=2, chokes=((46, (42, 44)),)))
 
 
 @pytest.fixture(scope="module")
@@ -198,14 +198,14 @@ def test_a_kit_shares_one_gain():
         (key, [(n, dataclasses.replace(p, output=peak)) for n, p in layers])
         for key, layers in ((42, ladder("closed", (0, 10))), (46, ladder("open", (0,))))
     ]
-    kit = K.build(groups, takes=2)
+    kit = K.build(groups, K.Options(takes=2))
     peaks = [float(np.max(np.abs(a))) for k in kit.keys for row in k.audio for a in row]
     assert 20 * math.log10(max(peaks)) == pytest.approx(-1.0, abs=1e-6)
     assert len({round(p, 9) for p in peaks}) == len(peaks)  # the others keep their natural levels
 
 
 def test_level_matching_within_each_layer():
-    kit = K.build([(42, ladder("closed", (0, 8)))], takes=4, level_match=True)
+    kit = K.build([(42, ladder("closed", (0, 8)))], K.Options(takes=4, level_match=True))
     for layer, files in zip(kit.keys[0].layers, kit.keys[0].audio):
         rate = layer.patch.output.sample_rate
         first = momentary_max(files[0], rate)
@@ -214,7 +214,7 @@ def test_level_matching_within_each_layer():
 
 
 def test_a_stereo_kit_pairs_consecutive_takes(tmp_path):
-    kit = K.build([(42, ladder("closed", (0, 12)))], takes=2, stereo=True)
+    kit = K.build([(42, ladder("closed", (0, 12)))], K.Options(takes=2, stereo=True))
     files = K.write(kit, tmp_path)
     layer = kit.keys[0].layers[0]
     assert layer.takes == ((1, 2), (3, 4))
@@ -226,7 +226,7 @@ def test_a_stereo_kit_pairs_consecutive_takes(tmp_path):
 def test_a_kit_re_renders_bit_identically(tmp_path):
     groups = [(42, ladder("closed", (0, 12))), (46, ladder("open", (0,)))]
     for d in ("a", "b"):
-        K.write(K.build(groups, takes=2, chokes=[(46, (42,))], stem="kit"), tmp_path / d)
+        K.write(K.build(groups, K.Options(takes=2, chokes=((46, (42,)),)), stem="kit"), tmp_path / d)
     names = sorted(f.name for f in (tmp_path / "a").iterdir())
     assert len(names) == 7
     for name in names:
@@ -246,7 +246,7 @@ def test_kits_refuse_what_they_cannot_map():
     with pytest.raises(K.PackError, match="given twice"):
         K.build([(42, [("loud", loud)]), (42, [("soft", soft)])])
     with pytest.raises(K.PackError, match="--takes"):
-        K.build([(42, [("loud", loud)])], takes=65, stereo=True)
+        K.build([(42, [("loud", loud)])], K.Options(takes=65, stereo=True))
 
 
 def test_the_command_writes_a_kit(tmp_path, capsys):

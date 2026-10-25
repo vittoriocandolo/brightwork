@@ -67,7 +67,8 @@ def onsets(y: np.ndarray, threshold: float, gap: int) -> list[int]:
 
 def identify(y: np.ndarray, start: int, files: dict) -> tuple[str, float, int]:
     """The file a note plays: the best normalized correlation over 256 samples from 300 samples in, within ±12
-    samples of `start`. Returns the file, the correlation and where the file starts in y."""
+    samples of `start`. Returns the file, the correlation and where the file starts in y.
+    """
     best = (-1.0, "", 0)
     for name, x in files.items():
         b = x[300:556]
@@ -87,7 +88,8 @@ def band_energy(a: np.ndarray, lo: float = 4000.0, hi: float = 8000.0) -> float:
 
 def level_db(a: np.ndarray, b: np.ndarray) -> float:
     """The gain of a over b, from their energies in one band: a player's own frequency response (liquidsfz's
-    interpolator rolls off the top octave by about 2 dB) then cancels between notes."""
+    interpolator rolls off the top octave by about 2 dB) then cancels between notes.
+    """
     return 10 * math.log10(max(band_energy(a), 1e-300) / band_energy(b))
 
 
@@ -111,7 +113,8 @@ def play_liquidsfz(binary, sfz, notes, out) -> np.ndarray:
     (out / "notes.txt").write_text("\n".join(lines) + "\n")
     frames = round((max(t for t, *_ in notes) + 2.0) * RATE)
     subprocess.run(
-        [binary, str(sfz), str(out / "notes.txt"), str(frames), str(RATE), str(out / "played.f32")], check=True
+        [binary, str(sfz), str(out / "notes.txt"), str(frames), str(RATE), str(out / "played.f32")],
+        check=True,
     )
     return np.fromfile(out / "played.f32", dtype="<f4").astype(float).reshape(-1, 2)
 
@@ -138,7 +141,7 @@ def played(request, tmp_path_factory):
     # each note can be told by correlation even through a player's interpolation.
     soft = dataclasses.replace(softer(closed, 12), take=11)
     groups = [(42, [("closed", closed), ("closed-12", soft)]), (46, [("open", loud("open"))])]
-    kit = K.build(groups, takes=2, chokes=[(46, (42,))], stem="kit")
+    kit = K.build(groups, K.Options(takes=2, chokes=((46, (42,)),)), stem="kit")
     K.write(kit, out / "kit")
     notes = [
         (0.5, 42, 127, 0.05),

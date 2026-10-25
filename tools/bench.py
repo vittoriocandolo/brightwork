@@ -49,14 +49,14 @@ KIT = r"""
 import json, resource, time
 from brightwork_synth import cli
 from brightwork_synth.patch import loads, softer
-from brightwork_synth.pack import build
+from brightwork_synth.pack import Options, build
 from brightwork_synth.render import decimator
 decimator(48000)
 groups = [(key, [(f"{name}{db}", softer(loads(cli.reference_text(name)), db)) for db in (0, 8, 16, 24)])
           for key, name in ((42, "closed"), (44, "pedal"), (46, "open"))]
 base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 t0 = time.perf_counter()
-kit = build(groups, takes=8, chokes=[(46, (42, 44))])
+kit = build(groups, Options(takes=8, chokes=((46, (42, 44)),)))
 seconds = time.perf_counter() - t0
 peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 files = sum(len(f) for k in kit.keys for f in k.audio)
@@ -96,7 +96,7 @@ def main() -> int:
 
     print(
         f"machine: {cpu()}, {os.cpu_count()} cores, Python {platform.python_version()}, "
-        f"NumPy {numpy.__version__}, SciPy {scipy.__version__}"
+        f"NumPy {numpy.__version__}, SciPy {scipy.__version__}",
     )
     print(f"{'sound':<30s} {'rate':>6s} {'sub-bands':>9s} {'new take':>9s} {'cached':>8s} {'limit':>7s} {'memory':>8s}")
     ok = True
@@ -108,14 +108,14 @@ def main() -> int:
             ok &= fine
             print(
                 f"{label:<30s} {rate:6d} {r['subbands']:9d} {1000 * r['fresh']:7.0f}ms {1000 * r['cached']:6.0f}ms "
-                f"{1000 * limit:5.0f}ms {r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}"
+                f"{1000 * limit:5.0f}ms {r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}",
             )
     r = run(KIT)
     fine = r["seconds"] <= KIT_S and r["mib"] <= MEMORY_MIB
     ok &= fine
     print(
         f"{'kit: 3 keys × 4 layers × 8 takes':<30s} {48000:6d} {'':>9s} {r['seconds']:8.1f}s {'':>8s} {KIT_S:6.0f}s "
-        f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}  ({r['files']} files)"
+        f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}  ({r['files']} files)",
     )
     return 0 if ok else 1
 

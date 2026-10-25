@@ -218,7 +218,8 @@ def test_one_render_knows_the_knee_slew_and_kink_bound_at_every_drive(edits, ton
 
 
 @pytest.mark.parametrize(
-    "edits", [{"drive.db": 6.0}, {**HOT}, {**FAST, "drive.db": 0.0}, {"noise[2].level_db": 3.0, "drive.db": 10.0}]
+    "edits",
+    [{"drive.db": 6.0}, {**HOT}, {**FAST, "drive.db": 0.0}, {"noise[2].level_db": 3.0, "drive.db": 10.0}],
 )
 def test_drive_headroom_finds_where_the_status_changes(edits):
     report = R.render(make(**edits))[1]
@@ -349,7 +350,7 @@ def test_the_report_flags_uneven_sets():
             "noise[2].level_db": 0.0,
             "noise[2].band_hz": [3000.0, 6000.0],
             "noise[2].amp": amp((0, 0), (0.05, 1), (0.15, 0.7), (0.5, 0.1), (1, 0)),
-        }
+        },
     )
     report = R.render_takes(click, 8)[1]
     assert report.uneven and "consider --level-match" in str(report)

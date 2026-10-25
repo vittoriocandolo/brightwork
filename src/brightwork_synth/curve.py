@@ -27,16 +27,25 @@ kind.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
 
-def pchip_slopes(t, v) -> np.ndarray:
-    """Knot slopes from the PCHIP rule, before any override."""
-    t = np.asarray(t, dtype=float)
-    v = np.asarray(v, dtype=float)
+type Floats = NDArray[np.float64]
+type Number = Floats | float
+type Segment = tuple[Number, Number, Number, Number, Number]  # a segment's width, end values and end slopes
+
+
+def pchip_slopes(times: ArrayLike, values: ArrayLike) -> Floats:
+    """Return the knot slopes from the PCHIP rule, before any override."""
+    t = np.asarray(times, dtype=float)
+    v = np.asarray(values, dtype=float)
     h = np.diff(t)
     m = np.diff(v) / h
-    if t.size == 2:
+    if h.size == 1:  # one segment: the secant at both ends
         return np.array([m[0], m[0]])
     ml, mr, hl, hr = m[:-1], m[1:], h[:-1], h[1:]
     agree = (np.sign(ml) == np.sign(mr)) & (ml != 0) & (mr != 0)
@@ -51,6 +60,7 @@ def pchip_slopes(t, v) -> np.ndarray:
 
 
 def _end_slope(h0: float, h1: float, m0: float, m1: float) -> float:
+    """Return an end knot's slope by the shape-preserving three-point rule."""
     d = ((2 * h0 + h1) * m0 - h0 * m1) / (h0 + h1)
     if np.sign(d) != np.sign(m0):
         return 0.0
@@ -62,15 +72,18 @@ def _end_slope(h0: float, h1: float, m0: float, m1: float) -> float:
 class Curve:
     """Cubic Hermite curve through knots (t, v) with knot slopes d."""
 
-    def __init__(self, t, v, d):
+    def __init__(self, t: ArrayLike, v: ArrayLike, d: ArrayLike) -> None:
+        """Make the curve through knot times t, values v and slopes d, read-only."""
         self.t = np.array(t, dtype=float)
         self.v = np.array(v, dtype=float)
         self.d = np.array(d, dtype=float)
-        if not (self.t.ndim == 1 and self.t.size >= 2 and self.v.shape == self.t.shape == self.d.shape):
-            raise ValueError("a curve needs at least two knots with one value and one slope each")
+        if not (self.t.ndim == 1 and self.t.size > 1 and self.v.shape == self.t.shape == self.d.shape):
+            msg = "a curve needs at least two knots with one value and one slope each"
+            raise ValueError(msg)
         self.h = np.diff(self.t)
         if not np.all(self.h > 0):
-            raise ValueError("knot times must increase")
+            msg = "knot times must increase"
+            raise ValueError(msg)
         v, d, h = self.v, self.d, self.h
         m = np.diff(v) / h
         self._second_start = (6 * m - 4 * d[:-1] - 2 * d[1:]) / h  # second derivative just after each segment starts
@@ -80,8 +93,8 @@ class Curve:
             a.flags.writeable = False
 
     @classmethod
-    def pchip(cls, t, v, *, first: float | None = None, last: float | None = None) -> Curve:
-        """PCHIP curve; `first` and `last` override the end slopes."""
+    def pchip(cls, t: ArrayLike, v: ArrayLike, *, first: float | None = None, last: float | None = None) -> Curve:
+        """Make the PCHIP curve through (t, v); `first` and `last` override the end slopes."""
         d = pchip_slopes(t, v)
         if first is not None:
             d[0] = first
@@ -91,39 +104,43 @@ class Curve:
 
     # Evaluation at arbitrary times.
 
-    def _segment(self, x: np.ndarray):
+    def _segment(self, x: Floats) -> tuple[NDArray[np.intp], Segment]:
+        """Return the segment of each time x: its index, and its width, end values and end slopes."""
         i = np.clip(np.searchsorted(self.t, x, side="right") - 1, 0, self.t.size - 2)
-        return i, self.h[i], self.v[i], self.v[i + 1], self.d[i], self.d[i + 1]
+        return i, (self.h[i], self.v[i], self.v[i + 1], self.d[i], self.d[i + 1])
 
-    def __call__(self, x) -> np.ndarray:
-        x = np.asarray(x, dtype=float)
-        i, h, va, vb, da, db = self._segment(x)
-        s = (x - self.t[i]) / h
-        y = _hermite(s, h, va, vb, da, db)
+    def __call__(self, at: ArrayLike) -> Floats:
+        """Evaluate the curve at times `at`, holding its end values outside its knots."""
+        x = np.asarray(at, dtype=float)
+        i, segment = self._segment(x)
+        y = _hermite((x - self.t[i]) / self.h[i], segment)
         y = np.where(x < self.t[0], self.v[0], y)
-        return np.where(x >= self.t[-1], self.v[-1], y)
+        out: Floats = np.where(x >= self.t[-1], self.v[-1], y)
+        return out
 
-    def derivative(self, x) -> np.ndarray:
-        """First derivative; 0 outside the knots."""
-        x = np.asarray(x, dtype=float)
-        i, h, va, vb, da, db = self._segment(x)
+    def derivative(self, at: ArrayLike) -> Floats:
+        """Return the first derivative at times `at`; 0 outside the knots."""
+        x = np.asarray(at, dtype=float)
+        i, (h, va, vb, da, db) = self._segment(x)
         s = (x - self.t[i]) / h
         y = 6 * (vb - va) / h * s * (1 - s) + da * (1 - s) * (1 - 3 * s) - db * s * (2 - 3 * s)
-        return np.where((x < self.t[0]) | (x > self.t[-1]), 0.0, y)
+        out: Floats = np.where((x < self.t[0]) | (x > self.t[-1]), 0.0, y)
+        return out
 
-    def second(self, x) -> np.ndarray:
-        """Second derivative (one-sided from the right at knots; 0 outside)."""
-        x = np.asarray(x, dtype=float)
+    def second(self, at: ArrayLike) -> Floats:
+        """Return the second derivative at times `at`, one-sided from the right at knots; 0 outside."""
+        x = np.asarray(at, dtype=float)
         i = np.clip(np.searchsorted(self.t, x, side="right") - 1, 0, self.t.size - 2)
         s = (x - self.t[i]) / self.h[i]
         y = self._second_start[i] * (1 - s) + self._second_end[i] * s
-        return np.where((x < self.t[0]) | (x >= self.t[-1]), 0.0, y)
+        out: Floats = np.where((x < self.t[0]) | (x >= self.t[-1]), 0.0, y)
+        return out
 
     # Evaluation on sorted times, one segment at a time.
 
-    def on(self, x: np.ndarray) -> np.ndarray:
-        """The curve at ascending times x: the same values as calling it, sliced by segment."""
-        x = np.asarray(x, dtype=float)
+    def on(self, at: ArrayLike) -> Floats:
+        """Evaluate the curve at ascending times: the same values as calling it, sliced by segment."""
+        x = np.asarray(at, dtype=float)
         y = np.empty_like(x)
         cut = np.searchsorted(x, self.t, side="left")  # x[cut[i]:cut[i + 1]] lies in segment i
         y[: cut[0]] = self.v[0]
@@ -131,14 +148,14 @@ class Curve:
             a, b = cut[i], cut[i + 1]
             if a < b:
                 s = (x[a:b] - self.t[i]) / self.h[i]
-                y[a:b] = _hermite(s, self.h[i], self.v[i], self.v[i + 1], self.d[i], self.d[i + 1])
+                y[a:b] = _hermite(s, (self.h[i], self.v[i], self.v[i + 1], self.d[i], self.d[i + 1]))
         y[cut[-1] :] = self.v[-1]
         return y
 
     # The knots' discontinuities.
 
-    def jumps(self) -> tuple[np.ndarray, np.ndarray]:
-        """Jumps in the second and third derivatives at each knot; the curve is constant outside.
+    def jumps(self) -> tuple[Floats, Floats]:
+        """Return the jumps in the second and third derivatives at each knot; the curve is constant outside.
 
         The curve is only C¹, so these jumps set how fast its spectrum falls.
         """
@@ -149,7 +166,7 @@ class Curve:
         return a2 - b2, a3 - b3
 
     def sides(self, k: int) -> tuple[float, float, float, float]:
-        """(x″ before, x″ after, x‴ before, x‴ after) at knot k; 0 outside the knots."""
+        """Return (x″ before, x″ after, x‴ before, x‴ after) at knot k; 0 outside the knots."""
         n = self.t.size
         before2 = float(self._second_end[k - 1]) if k > 0 else 0.0
         after2 = float(self._second_start[k]) if k < n - 1 else 0.0
@@ -158,31 +175,33 @@ class Curve:
         return before2, after2, before3, after3
 
 
-def _hermite(s, h, va, vb, da, db):
-    """The Hermite segment at normalized position s, clipped to its knot values.
+def _hermite(s: Floats, segment: Segment) -> Floats:
+    """Evaluate a Hermite segment at normalized positions s, clipped to its knot values.
 
     Horner's form of the cubic: exact at s = 0, and five times faster than the
     basis form, which matters because synthesis spends most of its time here.
     """
+    h, va, vb, da, db = segment
     a1 = h * da
     a2 = 3 * (vb - va) - 2 * a1 - h * db
     a3 = 2 * (va - vb) + a1 + h * db
     y = ((a3 * s + a2) * s + a1) * s + va
-    return np.clip(y, np.minimum(va, vb), np.maximum(va, vb))
+    out: Floats = np.clip(y, np.minimum(va, vb), np.maximum(va, vb))
+    return out
 
 
-def amplitude_curve(t, v) -> Curve:
-    """Amplitude shape or damper: zero end slopes, so it joins its constant ends smoothly."""
+def amplitude_curve(t: ArrayLike, v: ArrayLike) -> Curve:
+    """Make an amplitude shape or a damper: zero end slopes, so it joins its constant ends smoothly."""
     return Curve.pchip(t, v, first=0.0, last=0.0)
 
 
 def peak_index(shape: Curve) -> int:
-    """The shape's first knot at gain 1, where its decay starts."""
+    """Return the shape's first knot at gain 1, where its decay starts."""
     return int(np.flatnonzero(shape.v == 1.0)[0])
 
 
 def mapped(shape: Curve, r: float = 1.0, s: float = 1.0) -> Curve:
-    """The shape with its rise r times slower and its decay s times faster (plan §2.2, §2.6).
+    """Return the shape with its rise r times slower and its decay s times faster (plan §2.2, §2.6).
 
     With t₀ the first knot and t_pk the peak, the map is
 
@@ -202,7 +221,8 @@ def mapped(shape: Curve, r: float = 1.0, s: float = 1.0) -> Curve:
         return shape
     k = peak_index(shape)
     if shape.d[k] != 0:
-        raise ValueError("a time map needs a zero slope at the peak")
+        msg = "a time map needs a zero slope at the peak"
+        raise ValueError(msg)
     t0, tpk = shape.t[0], shape.t[k]
     t, d = shape.t.copy(), shape.d.copy()
     t[: k + 1] = t0 + (shape.t[: k + 1] - t0) * r

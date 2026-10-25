@@ -24,8 +24,17 @@ import re
 import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from .spectrum import MAX_COMPRESSION, MAX_SEED, MAX_TAKE, TOP_HZ, grid_bin, layout, worst_compression
+
+if TYPE_CHECKING:
+    import os
+    from collections.abc import Callable, Iterable, Sequence
+
+type Knots = tuple[tuple[float, float], ...]  # a curve's (ms, value) knots
+type Row = tuple[str, str, str]  # a canonical line's key, value and comment
 
 INSTRUMENT = "cymbal"
 SCHEMA = 1
@@ -40,44 +49,51 @@ MAX_PARTIALS = 16
 MAX_KNOTS = 32
 MAX_SPACING = 200.0
 MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as written
+PAIR = 2  # a knot, a partial and a band are two numbers each
 
 
 class PatchError(ValueError):
     """An invalid patch or edit. `problems` lists every reason, each with its field path."""
 
-    def __init__(self, problems):
+    def __init__(self, problems: Iterable[str]) -> None:
+        """Keep every problem, and make the message one problem per line."""
         self.problems = list(problems)
         super().__init__("\n".join(self.problems))
 
 
 @dataclass(frozen=True)
 class Noise:
+    """A noise source: continuous noise, or seeded modes at a mean spacing, through a band, under a shape."""
+
     level_db: float
-    band_hz: tuple  # (low, high)
+    band_hz: tuple[float, float]  # (low, high)
     spacing_hz: float  # 0: continuous noise
     damping: float
     bloom: float
     chatter: float
     chatter_hz: float
-    amp: tuple  # ((ms, gain), ...)
+    amp: Knots  # ((ms, gain), ...)
 
     @property
     def f_ref(self) -> float:
+        """The band's lower edge, from which damping and bloom count (plan §2.6)."""
         return self.band_hz[0]
 
 
 @dataclass(frozen=True)
 class Tone:
+    """A tone: sine or band-limited square partials at fixed frequencies, through a band, under a shape."""
+
     level_db: float
     wave: str
     phase: str
-    partials: tuple  # ((hz, level_db), ...)
-    band_hz: tuple
+    partials: tuple[tuple[float, float], ...]  # ((hz, level_db), ...)
+    band_hz: tuple[float, float]
     damping: float
     bloom: float
     chatter: float
     chatter_hz: float
-    amp: tuple
+    amp: Knots
 
     @property
     def f_ref(self) -> float:
@@ -87,16 +103,22 @@ class Tone:
 
 @dataclass(frozen=True)
 class Damper:
-    amp: tuple  # ((ms, gain), ...): none, or from 1 down to 0
+    """The damper, which multiplies every source: no knots, or a curve from 1 down to 0."""
+
+    amp: Knots  # ((ms, gain), ...)
 
 
 @dataclass(frozen=True)
 class Drive:
+    """The saturator's small-signal gain in dB; 0 is bypass."""
+
     db: float
 
 
 @dataclass(frozen=True)
 class Output:
+    """The exported file: its sample rate, format, level and polarity."""
+
     sample_rate: int
     format: str
     mode: str
@@ -106,26 +128,28 @@ class Output:
 
 @dataclass(frozen=True)
 class Patch:
+    """One hit: the cymbal, which is its seed, the strike, which is its take, its sources and its sections."""
+
     seed: int
     take: int
-    noise: tuple  # (Noise, ...)
-    tone: tuple  # (Tone, ...)
+    noise: tuple[Noise, ...]
+    tone: tuple[Tone, ...]
     damper: Damper
     drive: Drive
     output: Output
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Validate the patch, so that every Patch lies inside the valid domain."""
         problems = _Problems()
         _validate(self, problems)
         if problems:
             raise PatchError(problems)
 
     @property
-    def sources(self) -> tuple:
+    def sources(self) -> tuple[tuple[str, Noise | Tone], ...]:
         """Every source with its path prefix, noise first, in patch order."""
-        return tuple((f"noise[{j}]", s) for j, s in enumerate(self.noise, 1)) + tuple(
-            (f"tone[{j}]", s) for j, s in enumerate(self.tone, 1)
-        )
+        noise = tuple((f"noise[{j}]", s) for j, s in enumerate(self.noise, 1))
+        return noise + tuple((f"tone[{j}]", s) for j, s in enumerate(self.tone, 1))
 
     @property
     def length_ms(self) -> float:
@@ -140,27 +164,39 @@ class Patch:
         return end
 
 
-def peak_ms(amp: tuple) -> float:
+def peak_ms(amp: Knots) -> float:
+    """Return the time of a shape's first knot at gain 1."""
     return next(ms for ms, g in amp if g == 1.0)
 
 
-def sub_band_ends(source) -> list[float]:
+def sub_band_ends(source: Noise | Tone) -> list[float]:
     """Where each of a source's sub-bands ends, in ms: t₀ + r_b(t_pk − t₀) + (t_end − t_pk)/s_b."""
     lay = layout(source.f_ref, source.damping, source.bloom)
     t0, tpk, tend = source.amp[0][0], peak_ms(source.amp), source.amp[-1][0]
     r, s = lay.stretch(source.bloom), lay.compression(source.damping)
-    return [float(t0 + rb * (tpk - t0) + (tend - tpk) / sb) for rb, sb in zip(r, s)]
+    return [float(t0 + rb * (tpk - t0) + (tend - tpk) / sb) for rb, sb in zip(r, s, strict=True)]
 
 
 # Validation. Each check reports every problem it finds, with its path.
 
 
-class _Problems(list):
+class _Problems(list[str]):
+    """The problems found so far, each with its field path, and the checks that find them."""
+
     def add(self, path: str, message: str) -> None:
+        """Record a problem at a path."""
         self.append(f"{path}: {message}")
 
-    def number(self, path, v, lo=None, hi=None, *, silence=False):
-        """A finite number within [lo, hi], or -inf where silence is allowed; None if invalid."""
+    def number(
+        self,
+        path: str,
+        v: object,
+        lo: float | None = None,
+        hi: float | None = None,
+        *,
+        silence: bool = False,
+    ) -> float | None:
+        """Return v as a finite number within [lo, hi], or -inf where silence is allowed; None if invalid."""
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             self.add(path, f"expected a number, found {_kind(v)}")
             return None
@@ -174,26 +210,28 @@ class _Problems(list):
         if not math.isfinite(x):
             self.add(path, "must be finite" + (" (or -inf for silence)" if silence else ""))
             return None
-        if (lo is not None and x < lo) or (hi is not None and x > hi):
+        if lo is not None and hi is not None and not lo <= x <= hi:
             self.add(path, f"{x:g} is outside {lo:g} … {hi:g}" + (" (or -inf for silence)" if silence else ""))
             return None
         return x
 
-    def integer(self, path, v, allowed):
+    def integer(self, path: str, v: object, allowed: tuple[int, ...]) -> None:
+        """Check that v is one of the allowed integers."""
         if isinstance(v, bool) or not isinstance(v, int):
             self.add(path, f"expected an integer, found {_kind(v)}")
         elif v not in allowed:
             self.add(path, f"{v} is not one of {', '.join(map(str, allowed))}")
 
-    def choice(self, path, v, allowed):
+    def choice(self, path: str, v: object, allowed: tuple[str, ...]) -> str | None:
+        """Return v if it is one of the allowed strings; None if not."""
         if not isinstance(v, str) or v not in allowed:
             self.add(path, f"expected one of {', '.join(repr(a) for a in allowed)}, found {v!r}")
             return None
         return v
 
-    def knots(self, path, knots, key, count, max_ms):
-        """Knot pairs with valid times; the values are only checked to be numbers."""
-        if not isinstance(knots, tuple) or not all(isinstance(k, tuple) and len(k) == 2 for k in knots):
+    def knots(self, path: str, knots: object, key: str, count: int, max_ms: float) -> list[tuple[float, float]] | None:
+        """Return the knot pairs, if their times are valid; the values are only checked to be numbers."""
+        if not isinstance(knots, tuple) or not all(isinstance(k, tuple) and len(k) == PAIR for k in knots):
             self.add(path, f"expected (ms, {key}) knots")
             return None
         ok = count <= len(knots) <= MAX_KNOTS
@@ -203,8 +241,9 @@ class _Problems(list):
         values = [self.number(f"{path}[{i}].{key}", v) for i, (_, v) in enumerate(knots, 1)]
         if not ok or None in times or None in values:
             return None
+        times_ = cast("list[float]", times)
         for i in range(1, len(times)):
-            a, b = Decimal(repr(times[i - 1])), Decimal(repr(times[i]))
+            a, b = Decimal(repr(times_[i - 1])), Decimal(repr(times_[i]))
             where = f"{path}[{i + 1}].ms"
             if b == a:
                 self.add(where, "repeats the previous knot time")
@@ -212,11 +251,11 @@ class _Problems(list):
                 self.add(where, "is earlier than the previous knot")
             elif b - a < MIN_SPACING_MS:
                 self.add(where, f"is {b - a} ms after the previous knot; knots need 0.01 ms (10 µs)")
-        return list(zip(times, values))
+        return list(zip(times_, cast("list[float]", values), strict=True))
 
-    def shape(self, path, knots):
-        """An amplitude shape: gains in [0, 1], 0 at both ends, highest point exactly 1."""
-        knots = self.knots(path, knots, "gain", 3, MAX_MS)
+    def shape(self, path: str, amp: object) -> list[tuple[float, float]] | None:
+        """Return an amplitude shape's knots if valid: gains in [0, 1], 0 at both ends, highest point exactly 1."""
+        knots = self.knots(path, amp, "gain", 3, MAX_MS)
         if knots is None:
             return None
         gains = [g for _, g in knots]
@@ -234,8 +273,9 @@ class _Problems(list):
             return None
         return None if bad or gains[0] != 0.0 or gains[-1] != 0.0 else knots
 
-    def band(self, path, band):
-        if not isinstance(band, tuple) or len(band) != 2:
+    def band(self, path: str, band: object) -> tuple[float, float] | None:
+        """Return a band's edges if valid: two frequencies, the low one below the high one."""
+        if not isinstance(band, tuple) or len(band) != PAIR:
             self.add(path, "expected [low, high] in Hz")
             return None
         lo = self.number(f"{path}[1]", band[0], 20.0, TOP_HZ)
@@ -246,13 +286,16 @@ class _Problems(list):
         return None if lo is None or hi is None else (lo, hi)
 
 
-def _kind(v) -> str:
+def _kind(v: object) -> str:
+    """Name the kind of a value as TOML would."""
     return {bool: "a boolean", str: "a string", list: "an array", tuple: "an array", dict: "a table"}.get(
-        type(v), type(v).__name__
+        type(v),
+        type(v).__name__,
     )
 
 
 def _validate(p: Patch, problems: _Problems) -> None:
+    """Check every field of a patch."""
     _validate_seed(p.seed, problems)
     _validate_take(p.take, problems)
     ok = True
@@ -268,29 +311,31 @@ def _validate(p: Patch, problems: _Problems) -> None:
             problems.add("noise", "a patch needs at least one source, [[noise]] or [[tone]]")
         for j, s in enumerate(p.noise, 1):
             _validate_noise(s, f"noise[{j}]", problems)
-        for j, s in enumerate(p.tone, 1):
-            _validate_tone(s, f"tone[{j}]", problems)
+        for j, t in enumerate(p.tone, 1):
+            _validate_tone(t, f"tone[{j}]", problems)
     _validate_damper(p.damper, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
 
 
-def _validate_seed(seed, problems: _Problems) -> None:
+def _validate_seed(seed: object, problems: _Problems) -> None:
+    """Check the seed: an integer from 0 to 2**63 - 1."""
     if isinstance(seed, bool) or not isinstance(seed, int):
         problems.add("seed", f"expected an integer, found {_kind(seed)}")
     elif not 0 <= seed <= MAX_SEED:
         problems.add("seed", f"{seed} is outside 0 … 2**63 - 1")
 
 
-def _validate_take(take, problems: _Problems) -> None:
+def _validate_take(take: object, problems: _Problems) -> None:
+    """Check the take: an integer from 1 to 2**31."""
     if isinstance(take, bool) or not isinstance(take, int):
         problems.add("take", f"expected an integer, found {_kind(take)}")
     elif not 1 <= take <= MAX_TAKE:
         problems.add("take", f"{take} is outside 1 … 2**31")
 
 
-def _validate_common(s, path: str, f_ref, problems: _Problems) -> None:
-    """Level, damping, bloom, chatter and shape, and the sub-bands they imply."""
+def _validate_common(s: Noise | Tone, path: str, f_ref: float | None, problems: _Problems) -> None:
+    """Check level, damping, bloom, chatter and shape, and the sub-bands they imply."""
     problems.number(f"{path}.level_db", s.level_db, -90.0, 24.0, silence=True)
     damping = problems.number(f"{path}.damping", s.damping, 0.0, 3.0)
     bloom = problems.number(f"{path}.bloom", s.bloom, 0.0, 3.0)
@@ -314,6 +359,7 @@ def _validate_common(s, path: str, f_ref, problems: _Problems) -> None:
 
 
 def _validate_noise(s: Noise, path: str, problems: _Problems) -> None:
+    """Check a noise source."""
     band = problems.band(f"{path}.band_hz", s.band_hz)
     spacing = problems.number(f"{path}.spacing_hz", s.spacing_hz, 0.0, MAX_SPACING)
     if spacing is not None and 0 < spacing < 1:
@@ -322,6 +368,7 @@ def _validate_noise(s: Noise, path: str, problems: _Problems) -> None:
 
 
 def _validate_tone(s: Tone, path: str, problems: _Problems) -> None:
+    """Check a tone."""
     problems.choice(f"{path}.wave", s.wave, WAVES)
     problems.choice(f"{path}.phase", s.phase, PHASES)
     band = problems.band(f"{path}.band_hz", s.band_hz)
@@ -330,9 +377,9 @@ def _validate_tone(s: Tone, path: str, problems: _Problems) -> None:
     _validate_common(s, path, f_ref, problems)
 
 
-def _validate_partials(partials, path: str, problems: _Problems):
-    """The lowest partial if the partials are valid, else None."""
-    if not isinstance(partials, tuple) or not all(isinstance(q, tuple) and len(q) == 2 for q in partials):
+def _validate_partials(partials: object, path: str, problems: _Problems) -> float | None:
+    """Return the lowest partial if the partials are valid, else None."""
+    if not isinstance(partials, tuple) or not all(isinstance(q, tuple) and len(q) == PAIR for q in partials):
         problems.add(path, "expected (hz, level_db) partials")
         return None
     if not 1 <= len(partials) <= MAX_PARTIALS:
@@ -342,15 +389,17 @@ def _validate_partials(partials, path: str, problems: _Problems):
     levels = [problems.number(f"{path}[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(partials, 1)]
     if None in hz:
         return None
-    for i in range(1, len(hz)):
-        if not grid_bin(hz[i]) > grid_bin(hz[i - 1]):
+    freqs = cast("list[float]", hz)
+    for i in range(1, len(freqs)):
+        if not grid_bin(freqs[i]) > grid_bin(freqs[i - 1]):
             problems.add(f"{path}[{i + 1}].hz", "partials must increase by at least 1/8 Hz, the grid's step")
-    if None not in levels and max(levels) != 0.0:
-        problems.add(path, f"the loudest partial must be exactly 0 dB, found {max(levels)!r}")
-    return hz[0]
+    if None not in levels and (loudest := max(cast("list[float]", levels))) != 0.0:
+        problems.add(path, f"the loudest partial must be exactly 0 dB, found {loudest!r}")
+    return freqs[0]
 
 
-def _validate_damper(d: Damper, problems: _Problems) -> None:
+def _validate_damper(d: object, problems: _Problems) -> None:
+    """Check the damper: no knots, or from exactly 1 down to exactly 0, never increasing."""
     if not isinstance(d, Damper):
         problems.add("damper", "expected a damper section")
         return
@@ -369,14 +418,16 @@ def _validate_damper(d: Damper, problems: _Problems) -> None:
             problems.add(f"damper.amp[{i + 1}].gain", "a damper never increases")
 
 
-def _validate_drive(d: Drive, problems: _Problems) -> None:
+def _validate_drive(d: object, problems: _Problems) -> None:
+    """Check the drive."""
     if not isinstance(d, Drive):
         problems.add("drive", "expected a drive section")
     else:
         problems.number("drive.db", d.db, 0.0, 48.0)
 
 
-def _validate_output(o: Output, problems: _Problems) -> None:
+def _validate_output(o: object, problems: _Problems) -> None:
+    """Check the output section."""
     if not isinstance(o, Output):
         problems.add("output", "expected an output section")
         return
@@ -401,7 +452,14 @@ _FIELDS = {
 _OPTIONAL = ("noise", "tone")
 
 
-def _keys(problems: _Problems, prefix: str, table: dict, expected, optional=()) -> bool:
+def _keys(
+    problems: _Problems,
+    prefix: str,
+    table: dict[str, Any],
+    expected: tuple[str, ...],
+    optional: tuple[str, ...] = (),
+) -> bool:
+    """Report unknown keys, and missing ones of those expected; True when none is missing."""
     for key in table:
         if key not in expected:
             problems.add(f"{prefix}{key}", "unknown field")
@@ -411,8 +469,8 @@ def _keys(problems: _Problems, prefix: str, table: dict, expected, optional=()) 
     return not missing
 
 
-def _float(v):
-    """TOML integers are accepted for floats; anything else is left for validation to name."""
+def _float[T](v: T) -> T | float:
+    """Return a TOML integer as a float, which floats accept; anything else is left for validation to name."""
     if isinstance(v, int) and not isinstance(v, bool):
         try:
             return float(v)
@@ -421,8 +479,8 @@ def _float(v):
     return v
 
 
-def _pairs(problems: _Problems, path: str, items, keys):
-    """An array of inline tables with exactly these keys, as tuples of numbers."""
+def _pairs(problems: _Problems, path: str, items: object, keys: tuple[str, str]) -> tuple[tuple[Any, ...], ...] | None:
+    """Return an array of inline tables with exactly these keys as tuples, their numbers as floats."""
     if not isinstance(items, list):
         problems.add(path, f"expected an array of {{ {', '.join(keys)} }} tables, found {_kind(items)}")
         return None
@@ -437,18 +495,21 @@ def _pairs(problems: _Problems, path: str, items, keys):
     return tuple(out)
 
 
-def _section(problems: _Problems, path: str, table, fields):
+def _section(problems: _Problems, path: str, table: object, fields: tuple[str, ...]) -> dict[str, Any] | None:
+    """Return a section's table if it has exactly these fields; None after reporting what is wrong."""
     if not isinstance(table, dict):
         problems.add(path, f"expected a table, found {_kind(table)}")
         return None
     return table if _keys(problems, f"{path}.", table, fields) else None
 
 
-def _band(v):
+def _band[T](v: T) -> T | tuple[Any, ...]:
+    """Return a TOML array as a tuple, its integers as floats; anything else is left for validation to name."""
     return tuple(map(_float, v)) if isinstance(v, list) else v
 
 
-def _noise(problems: _Problems, path: str, table):
+def _noise(problems: _Problems, path: str, table: object) -> Noise | None:
+    """Build a noise source from its table; None after reporting what is missing."""
     t = _section(problems, path, table, _FIELDS["noise"])
     if t is None:
         return None
@@ -467,7 +528,8 @@ def _noise(problems: _Problems, path: str, table):
     )
 
 
-def _tone(problems: _Problems, path: str, table):
+def _tone(problems: _Problems, path: str, table: object) -> Tone | None:
+    """Build a tone from its table; None after reporting what is missing."""
     t = _section(problems, path, table, _FIELDS["tone"])
     if t is None:
         return None
@@ -489,11 +551,8 @@ def _tone(problems: _Problems, path: str, table):
     )
 
 
-def from_dict(data) -> Patch:
-    """Build a patch from parsed TOML, reporting every problem at once."""
-    if not isinstance(data, dict):
-        raise PatchError(["expected a table"])
-    # The instrument and schema come first: another instrument or a newer schema may share nothing else.
+def _header(data: dict[str, Any]) -> None:
+    """Check the instrument and the schema, which come first: another instrument or schema may share nothing else."""
     instrument = data.get("instrument")
     if instrument is None:
         raise PatchError([f'instrument: missing; a cymbal patch starts with instrument = "{INSTRUMENT}"'])
@@ -507,32 +566,61 @@ def from_dict(data) -> Patch:
     if schema != SCHEMA:
         raise PatchError([f"schema: unsupported version {schema}; this renderer reads schema {SCHEMA}"])
 
+
+def _sources[S: (Noise, Tone)](
+    problems: _Problems,
+    data: dict[str, Any],
+    name: str,
+    build: Callable[[_Problems, str, object], S | None],
+) -> tuple[S, ...] | None:
+    """Build the sources of one kind, [[noise]] or [[tone]]; None after reporting what is wrong."""
+    tables = data.get(name, [])
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        problems.add(name, f"expected an array of tables ([[{name}]]), found {_kind(tables)}")
+        return None
+    built = [build(problems, f"{name}[{j}]", t) for j, t in enumerate(tables, 1)]
+    return None if any(b is None for b in built) else tuple(b for b in built if b is not None)
+
+
+def _damper(problems: _Problems, data: dict[str, Any]) -> Damper | None:
+    """Build the damper section; None after reporting what is wrong."""
+    if "damper" not in data or (t := _section(problems, "damper", data["damper"], _FIELDS["damper"])) is None:
+        return None
+    amp = _pairs(problems, "damper.amp", t["amp"], ("ms", "gain"))
+    return None if amp is None else Damper(amp)
+
+
+def _drive(problems: _Problems, data: dict[str, Any]) -> Drive | None:
+    """Build the drive section; None after reporting what is wrong."""
+    if "drive" not in data or (t := _section(problems, "drive", data["drive"], _FIELDS["drive"])) is None:
+        return None
+    return Drive(_float(t["db"]))
+
+
+def _output(problems: _Problems, data: dict[str, Any]) -> Output | None:
+    """Build the output section; None after reporting what is wrong."""
+    if "output" not in data or (t := _section(problems, "output", data["output"], _FIELDS["output"])) is None:
+        return None
+    return Output(t["sample_rate"], t["format"], t["mode"], _float(t["db"]), t["polarity"])
+
+
+def from_dict(data: object) -> Patch:
+    """Build a patch from parsed TOML, reporting every problem at once."""
+    if not isinstance(data, dict):
+        raise PatchError(["expected a table"])
+    _header(data)
     problems = _Problems()
     _keys(problems, "", data, _FIELDS[""], _OPTIONAL)
-    seed, take = data.get("seed"), data.get("take")
-    sources = {}
-    for name, build in (("noise", _noise), ("tone", _tone)):
-        tables = data.get(name, [])
-        if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
-            problems.add(name, f"expected an array of tables ([[{name}]]), found {_kind(tables)}")
-            sources[name] = None
-            continue
-        built = [build(problems, f"{name}[{j}]", t) for j, t in enumerate(tables, 1)]
-        sources[name] = None if None in built else tuple(built)
-    damper = drive = output = None
-    if "damper" in data and (t := _section(problems, "damper", data["damper"], _FIELDS["damper"])) is not None:
-        amp = _pairs(problems, "damper.amp", t["amp"], ("ms", "gain"))
-        if amp is not None:
-            damper = Damper(amp)
-    if "drive" in data and (t := _section(problems, "drive", data["drive"], _FIELDS["drive"])) is not None:
-        drive = Drive(_float(t["db"]))
-    if "output" in data and (t := _section(problems, "output", data["output"], _FIELDS["output"])) is not None:
-        output = Output(t["sample_rate"], t["format"], t["mode"], _float(t["db"]), t["polarity"])
-    if None in (sources["noise"], sources["tone"], damper, drive, output) or "seed" not in data or "take" not in data:
+    noise = _sources(problems, data, "noise", _noise)
+    tone = _sources(problems, data, "tone", _tone)
+    damper, drive, output = _damper(problems, data), _drive(problems, data), _output(problems, data)
+    if noise is None or tone is None or damper is None or drive is None or output is None:
         raise PatchError(problems or ["invalid patch"])
+    if "seed" not in data or "take" not in data:
+        raise PatchError(problems)
     # Every part is there, so every value is checked as well, and all the problems are reported together.
     try:
-        p = Patch(seed, take, sources["noise"], sources["tone"], damper, drive, output)
+        p = Patch(data["seed"], data["take"], noise, tone, damper, drive, output)
     except PatchError as e:
         raise PatchError(problems + list(e.problems)) from None
     if problems:
@@ -541,6 +629,7 @@ def from_dict(data) -> Patch:
 
 
 def loads(text: str) -> Patch:
+    """Read a patch from TOML text."""
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
@@ -548,17 +637,19 @@ def loads(text: str) -> Patch:
     return from_dict(data)
 
 
-def load(path) -> Patch:
-    with open(path, encoding="utf-8") as f:
-        return loads(f.read())
+def load(path: str | os.PathLike[str]) -> Patch:
+    """Read a patch from a UTF-8 TOML file."""
+    return loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _knots_dict(knots) -> list:
+def _knots_dict(knots: Knots) -> list[dict[str, float]]:
+    """Return knots as TOML parses them: an array of { ms, gain } tables."""
     return [{"ms": m, "gain": g} for m, g in knots]
 
 
-def to_dict(p: Patch) -> dict:
-    out = {"instrument": INSTRUMENT, "schema": SCHEMA, "seed": p.seed, "take": p.take}
+def to_dict(p: Patch) -> dict[str, Any]:
+    """Return the plain data that TOML parses to, so that from_dict(to_dict(p)) == p."""
+    out: dict[str, Any] = {"instrument": INSTRUMENT, "schema": SCHEMA, "seed": p.seed, "take": p.take}
     if p.noise:
         out["noise"] = [
             {
@@ -608,7 +699,7 @@ _COMMENT_COLUMN = 28
 
 
 def dumps(p: Patch) -> str:
-    """The complete patch as TOML with the canonical comments; loads(dumps(p)) == p exactly."""
+    """Write the complete patch as TOML with the canonical comments; loads(dumps(p)) == p exactly."""
     o = p.output
     lines = [
         f'instrument = "{INSTRUMENT}"',
@@ -624,31 +715,31 @@ def dumps(p: Patch) -> str:
                 ("band_hz", _band_text(s.band_hz), ""),
                 ("spacing_hz", _f(s.spacing_hz), "mean distance between modes; 0 = continuous noise"),
                 *_common_rows(s),
-            ]
+            ],
         )
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in s.amp], "shape: 0 at both ends, peak exactly 1")
-    for j, s in enumerate(p.tone, 1):
+    for j, t in enumerate(p.tone, 1):
         lines += ["", _note("[[tone]]", f"tone[{j}]")]
         lines += _rows(
             [
-                ("level_db", _f(s.level_db), ""),
-                ("wave", f'"{s.wave}"', '"sine" | "square"'),
-                ("phase", f'"{s.phase}"', '"strike" | "free"'),
-            ]
+                ("level_db", _f(t.level_db), ""),
+                ("wave", f'"{t.wave}"', '"sine" | "square"'),
+                ("phase", f'"{t.phase}"', '"strike" | "free"'),
+            ],
         )
         lines += _array(
             "partials",
-            [(("hz", f), ("level_db", v)) for f, v in s.partials],
+            [(("hz", f), ("level_db", v)) for f, v in t.partials],
             "loudest exactly 0 dB; at the nearest 1/8 Hz",
         )
-        lines += _rows([("band_hz", _band_text(s.band_hz), ""), *_common_rows(s)])
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in s.amp], "shape: 0 at both ends, peak exactly 1")
+        lines += _rows([("band_hz", _band_text(t.band_hz), ""), *_common_rows(t)])
+        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in t.amp], "shape: 0 at both ends, peak exactly 1")
     lines += ["", _note("[damper]", "multiplies every source: 1 until damped, then 0")]
     if p.damper.amp:
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in p.damper.amp], "from 1 down to 0")
     else:
         lines += [_note("amp = []", "no knots: never damped")]
-    lines += ["", "[drive]"] + _rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])
+    lines += ["", "[drive]", *_rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])]
     lines += ["", "[output]"]
     lines += _rows(
         [
@@ -657,12 +748,13 @@ def dumps(p: Patch) -> str:
             ("mode", f'"{o.mode}"', '"gain" | "peak"'),
             ("db", _f(o.db), "gain in dB, or peak target in dBFS"),
             ("polarity", str(o.polarity), ""),
-        ]
+        ],
     )
     return "\n".join(lines) + "\n"
 
 
-def _common_rows(s) -> list:
+def _common_rows(s: Noise | Tone) -> list[Row]:
+    """Return the rows every source has: damping, bloom and chatter."""
     return [
         ("damping", _f(s.damping), "content at f decays (f / f_ref)^damping times faster"),
         ("bloom", _f(s.bloom), "and rises (f / f_ref)^bloom times slower"),
@@ -672,27 +764,33 @@ def _common_rows(s) -> list:
 
 
 def _f(x: float) -> str:
+    """Write a number as a TOML float, exactly."""
     return repr(float(x))
 
 
-def _band_text(band) -> str:
+def _band_text(band: tuple[float, float]) -> str:
+    """Write a band as a TOML array."""
     return f"[{_f(band[0])}, {_f(band[1])}]"
 
 
 def _note(line: str, note: str) -> str:
+    """Add a comment to a line, in the comment column."""
     return f"{(line + ' ').ljust(_COMMENT_COLUMN)}# {note}" if note else line
 
 
-def _rows(rows) -> list[str]:
+def _rows(rows: list[Row]) -> list[str]:
+    """Write key = value lines, their equals signs aligned, each with its comment."""
     width = max(len(k) for k, _, _ in rows)
     return [_note(f"{k.ljust(width)} = {v}", note) for k, v, note in rows]
 
 
-def _array(name, items, note) -> list[str]:
-    """An array of inline tables, with the first column aligned."""
+def _array(name: str, items: list[tuple[tuple[str, float], tuple[str, float]]], note: str) -> list[str]:
+    """Write an array of two-key inline tables, with the first column aligned."""
     firsts = [f"{items[0][0][0]} = {_f(a[1])}," for a, _ in items] if items else []
     width = max(map(len, firsts), default=0)
-    body = [f"  {{ {first.ljust(width)} {key} = {_f(v)} }}," for first, (_, (key, v)) in zip(firsts, items)]
+    body = [
+        f"  {{ {first.ljust(width)} {key} = {_f(v)} }}," for first, (_, (key, v)) in zip(firsts, items, strict=True)
+    ]
     return [_note(f"{name} = [", note), *body, "]"]
 
 
@@ -703,16 +801,17 @@ _LETTERS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
 
 def midi_pitch(hz: float) -> float:
-    """Fractional MIDI note number (A4 = 69 = 440 Hz)."""
+    """Return the fractional MIDI note number of a frequency (A4 = 69 = 440 Hz)."""
     return 69.0 + 12.0 * math.log2(hz / 440.0)
 
 
 def note_name(midi: int) -> str:
+    """Return the name of MIDI note `midi`, such as 'F#3'."""
     return f"{_NOTES[midi % 12]}{midi // 12 - 1}"
 
 
 def describe_pitch(hz: float) -> str:
-    """For example 'F#3 -3.2 cents'."""
+    """Describe a frequency by its nearest note and its offset in cents, such as 'F#3 -3.2 cents'."""
     p = midi_pitch(hz)
     n = round(p)
     cents = round(100 * (p - n), 1) + 0.0  # + 0.0 turns -0.0 into 0.0
@@ -720,12 +819,12 @@ def describe_pitch(hz: float) -> str:
 
 
 def parse_note(text: str) -> float | None:
-    """A note name such as D5, C#4 or Eb3, in Hz; None if the text is not a note name."""
+    """Return a note name such as D5, C#4 or Eb3 in Hz; None if the text is not a note name."""
     m = re.fullmatch(r"([A-Ga-g])([#b]?)(-?\d+)", text.strip())
     if not m:
         return None
     midi = _LETTERS[m.group(1).upper()] + {"#": 1, "b": -1, "": 0}[m.group(2)] + 12 * (int(m.group(3)) + 1)
-    return 440.0 * 2.0 ** ((midi - 69) / 12)
+    return 440.0 * float(2.0 ** ((midi - 69) / 12))
 
 
 # Editing commands. Each returns a new, validated patch, or raises PatchError.
@@ -735,24 +834,27 @@ _MHZ = Decimal("0.001")  # frequencies are rewritten to 1 mHz
 
 
 def _dec(x: float) -> Decimal:
-    """The decimal value as written."""
+    """Return the decimal value as written."""
     return Decimal(repr(float(x)))
 
 
-def _ms(x) -> float:
-    return float(Decimal(x).quantize(_US))
+def _ms(x: Decimal) -> float:
+    """Round a time to 1 µs."""
+    return float(x.quantize(_US))
 
 
 def _hz(x: Decimal) -> float:
+    """Round a frequency to 1 mHz."""
     return float(x.quantize(_MHZ))
 
 
 def _significant(x: float, digits: int = 4) -> float:
+    """Round to `digits` significant digits."""
     return float(f"{x:.{digits}g}")
 
 
 def pitch_ratio(p: Patch, text: str) -> float:
-    """The ratio a `pitch` argument names: ±semitones, or a note for tone[1]'s lowest partial."""
+    """Return the ratio a `pitch` argument names: ±semitones, or a note for tone[1]'s lowest partial."""
     hz = parse_note(text)
     if hz is not None:
         if not p.tone:
@@ -762,11 +864,11 @@ def pitch_ratio(p: Patch, text: str) -> float:
         semitones = float(text)
     except ValueError:
         raise PatchError(
-            [f"pitch: expected semitones such as +2 or -3.5, or a note such as D5, found {text!r}"]
+            [f"pitch: expected semitones such as +2 or -3.5, or a note such as D5, found {text!r}"],
         ) from None
     if not math.isfinite(semitones):
         raise PatchError([f"pitch: expected a finite number of semitones, found {text!r}"])
-    return 2.0 ** (semitones / 12.0)
+    return float(2.0 ** (semitones / 12.0))
 
 
 def pitch(p: Patch, text: str) -> Patch:
@@ -803,17 +905,20 @@ def pitch(p: Patch, text: str) -> Patch:
 
 
 def curve_names(p: Patch) -> tuple[str, ...]:
+    """Name the patch's curves: every source's shape, then the damper."""
     names = [f"{prefix}.amp" for prefix, _ in p.sources]
     return (*names, "damper.amp")
 
 
-def _get_curve(p: Patch, name: str) -> tuple:
+def _get_curve(p: Patch, name: str) -> Knots:
+    """Return a curve's knots, by its name."""
     if name == "damper.amp":
         return p.damper.amp
     return _source(p, name[: -len(".amp")]).amp
 
 
-def _source(p: Patch, name: str):
+def _source(p: Patch, name: str) -> Noise | Tone:
+    """Return a source by its path, such as "noise[1]"."""
     for prefix, s in p.sources:
         if prefix == name:
             return s
@@ -821,7 +926,8 @@ def _source(p: Patch, name: str):
     raise PatchError([f"{name}: not a source of this patch; it has {names}"])
 
 
-def _set_curves(p: Patch, curves: dict) -> Patch:
+def _set_curves(p: Patch, curves: dict[str, Knots]) -> Patch:
+    """Return the patch with these curves replaced, by name."""
     noise = tuple(
         dataclasses.replace(s, amp=curves[f"noise[{j}].amp"]) if f"noise[{j}].amp" in curves else s
         for j, s in enumerate(p.noise, 1)
@@ -834,7 +940,7 @@ def _set_curves(p: Patch, curves: dict) -> Patch:
     return dataclasses.replace(p, noise=noise, tone=tone, damper=damper)
 
 
-def stretch(p: Patch, curves, factor: float, after_ms: float | None = None) -> Patch:
+def stretch(p: Patch, curves: str | Sequence[str], factor: float, after_ms: float | None = None) -> Patch:
     """Rescale knot times after each shape's peak, or after `after_ms`, by `factor`.
 
     `curves` names curves by path (`noise[1].amp`, `tone[1].amp`, `damper.amp`);
@@ -845,7 +951,7 @@ def stretch(p: Patch, curves, factor: float, after_ms: float | None = None) -> P
         raise PatchError([f"stretch: the factor must be a positive number, found {factor!r}"])
     if after_ms is not None and not (math.isfinite(after_ms) and after_ms >= 0):
         raise PatchError([f"--after: must be a time in ms from 0 on, found {after_ms!r}"])
-    names = []
+    names: list[str] = []
     for name in [curves] if isinstance(curves, str) else curves:
         if name == "all":
             names += [n for n in curve_names(p) if n != "damper.amp" or p.damper.amp]
@@ -858,10 +964,8 @@ def stretch(p: Patch, curves, factor: float, after_ms: float | None = None) -> P
         knots = _get_curve(p, name)
         if not knots:
             continue
-        if after_ms is not None:
-            anchor = after_ms
-        else:
-            anchor = 0.0 if name == "damper.amp" else peak_ms(knots)
+        default = 0.0 if name == "damper.amp" else peak_ms(knots)
+        anchor = default if after_ms is None else after_ms
         a, f = _dec(anchor), Decimal(repr(float(factor)))
         out[name] = tuple((ms if ms <= anchor else _ms(a + f * (_dec(ms) - a)), v) for ms, v in knots)
     return _set_curves(p, out)
@@ -871,9 +975,10 @@ CHOKE_DB = 60.0  # a choke's release falls this far, in knots every 10 dB
 DEFAULT_RELEASE_MS = 40.0
 
 
-def choke_knots(ms: float, release: float = DEFAULT_RELEASE_MS) -> tuple:
-    """A choke's damper: gain 1 at `ms`, knots every 10 dB evenly spaced over `release` down to −60 dB, and 0 one
-    step later. Times are written to 1 µs and gains to 4 significant digits. Audition fades a choked hit the same way.
+def choke_knots(ms: float, release: float = DEFAULT_RELEASE_MS) -> Knots:
+    """Return a choke's damper: 1 at `ms`, knots every 10 dB evenly over `release` down to −60 dB, then 0 a step on.
+
+    Times are written to 1 µs and gains to 4 significant digits. Audition fades a choked hit the same way.
     """
     steps = int(CHOKE_DB // 10)
     if not (math.isfinite(ms) and ms >= 0):
@@ -882,8 +987,7 @@ def choke_knots(ms: float, release: float = DEFAULT_RELEASE_MS) -> tuple:
         raise PatchError([f"--release: needs at least {steps * float(MIN_SPACING_MS):g} ms, found {release!r}"])
     start, step = _dec(ms), _dec(release) / steps
     knots = [(_ms(start), 1.0)]
-    for k in range(1, steps + 1):
-        knots.append((_ms(start + step * k), _significant(10 ** (-k / 2))))
+    knots += [(_ms(start + step * k), _significant(10 ** (-k / 2))) for k in range(1, steps + 1)]
     knots.append((_ms(start + step * (steps + 1)), 0.0))
     return tuple(knots)
 
@@ -893,14 +997,15 @@ def choke(p: Patch, ms: float, release: float = DEFAULT_RELEASE_MS) -> Patch:
     return dataclasses.replace(p, damper=Damper(choke_knots(ms, release)))
 
 
-def rises(values) -> list[tuple[int, int]]:
-    """(first, last) knot indices of each rise: a maximal run of strictly increasing knots.
+def rises(values: Sequence[float]) -> list[tuple[int, int]]:
+    """Return the (first, last) knot indices of each rise: a maximal run of strictly increasing knots.
 
     Both ends of a rise have zero slope, the first because nothing before it is
     lower and the last because nothing after it is higher, so a rise can be
     lengthened without changing the rest of the curve.
     """
-    out, i, n = [], 0, len(values)
+    out: list[tuple[int, int]] = []
+    i, n = 0, len(values)
     while i < n - 1:
         if values[i + 1] > values[i]:
             k = i
@@ -913,7 +1018,7 @@ def rises(values) -> list[tuple[int, int]]:
     return out
 
 
-def _lengthen_rises(knots: tuple, factor: Decimal) -> tuple:
+def _lengthen_rises(knots: Knots, factor: Decimal) -> Knots:
     """Lengthen every rise by `factor` and shift later knots by the added time, all to 1 µs.
 
     The shift after each rise is the exact added time so far, rounded once, so
@@ -934,11 +1039,11 @@ def _lengthen_rises(knots: tuple, factor: Decimal) -> tuple:
         done = b + 1
     for k in range(done, len(times)):
         new[k] = times[k] + shift
-    return tuple((float(t), v) for t, (_, v) in zip(new, knots))
+    return tuple((float(t), v) for t, (_, v) in zip(new, knots, strict=True))
 
 
 def softer(p: Patch, db: float, contact: float = 0.2) -> Patch:
-    """The same cymbal struck `db` softer, by two rules of plan §2.11.
+    """Return the same cymbal struck `db` softer, by two rules of plan §2.11.
 
     With v = 10^(−db/20):
       * Level: every source level falls by db (silent sources stay silent).
@@ -954,10 +1059,10 @@ def softer(p: Patch, db: float, contact: float = 0.2) -> Patch:
         return p
     v = 10 ** (-db / 20)
 
-    def level(x):
+    def level(x: float) -> float:
         return x if x == -math.inf else float(round(_dec(x) - Decimal(repr(float(db))), 6))
 
-    def soften(s):
+    def soften[S: (Noise, Tone)](s: S) -> S:
         amp, band = s.amp, s.band_hz
         if contact:
             amp = _lengthen_rises(amp, Decimal(repr(v**-contact)))

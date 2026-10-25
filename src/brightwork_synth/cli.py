@@ -1,8 +1,10 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Command line (plan §7.6): brightwork init | render | verify | extract | audition | pack, and the editing commands
-pitch | stretch | choke | softer, which print a complete, canonical patch."""
+"""Command line (plan §7.6): brightwork init | render | verify | extract | audition | pack.
+
+The editing commands, pitch | stretch | choke | softer, print a complete, canonical patch.
+"""
 
 from __future__ import annotations
 
@@ -12,42 +14,55 @@ import math
 import sys
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from . import patch as P
-from .patch import PatchError, dumps, loads
+from . import wav
+from .audition import Settings, audition
+from .pack import Options, pack
+from .patch import DEFAULT_RELEASE_MS, Patch, PatchError, choke, dumps, loads, pitch, softer, stretch
+from .reference import verify
+from .render import FORMATS, RenderError, db, export, render_takes
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 REFERENCES = ("closed", "open", "pedal", "crash", "ride", "bell", "analog")
+SHORTEST_BEATS, LONGEST_BEATS = 1 / 8, 16  # the grid's note values, 1/32 to 4/1, in beats of a 4/4 bar
+MAX_KEY = 127  # the highest MIDI key
 
 
 def reference_text(name: str) -> str:
+    """Return a reference patch's text, as it ships."""
     return resources.files("brightwork_synth").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
 
 
 def _read(path: str) -> str:
+    """Read a patch file's text, or exit with what the system said about it."""
     try:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
+        return Path(path).read_text(encoding="utf-8")
     except OSError as e:
-        raise SystemExit(_fail(f"{path}: {e.strerror}"))
+        raise SystemExit(_fail(f"{path}: {e.strerror}")) from None
 
 
 def _fail(message: str, code: int = 2) -> int:
-    print(message, file=sys.stderr)
+    """Say what went wrong on standard error, and return the exit status."""
+    sys.stderr.write(f"{message}\n")
     return code
 
 
-def _patch(path: str, text: str | None = None) -> P.Patch:
+def _patch(path: str) -> Patch:
+    """Read a patch file, or exit with every problem it has."""
     try:
-        return loads(_read(path) if text is None else text)
+        return loads(_read(path))
     except PatchError as e:
-        raise SystemExit(_fail(f"{path}: invalid patch\n" + "\n".join(f"  {m}" for m in e.problems)))
+        raise SystemExit(_fail(f"{path}: invalid patch\n" + "\n".join(f"  {m}" for m in e.problems))) from None
 
 
-def _edit(path: str, what: str, fn, *args, **kwargs) -> int:
+def _edit(path: str, what: str, edit: Callable[..., Patch], *args: object) -> int:
     """Apply an editing command and print the patch, or say why it cannot be done."""
     p = _patch(path)
     try:
-        q = fn(p, *args, **kwargs)
+        q = edit(p, *args)
     except (ValueError, PatchError) as e:
         problems = e.problems if isinstance(e, PatchError) else [str(e)]
         return _fail(f"{path}: cannot {what}\n" + "\n".join(f"  {m}" for m in problems))
@@ -55,62 +70,58 @@ def _edit(path: str, what: str, fn, *args, **kwargs) -> int:
     return 0
 
 
-def cmd_init(args) -> int:
+def cmd_init(args: argparse.Namespace) -> int:
+    """Print a reference patch, as a complete starting point."""
     sys.stdout.write(dumps(loads(reference_text(args.reference))))
     return 0
 
 
-def cmd_pitch(args) -> int:
-    return _edit(args.patch, f"pitch it {args.amount}", P.pitch, args.amount)
+def cmd_pitch(args: argparse.Namespace) -> int:
+    """Print the patch with every frequency moved by semitones, or to a note."""
+    return _edit(args.patch, f"pitch it {args.amount}", pitch, args.amount)
 
 
-def cmd_stretch(args) -> int:
-    return _edit(
-        args.patch,
-        f"stretch {' '.join(args.curves)} by {args.factor:g}",
-        P.stretch,
-        args.curves,
-        args.factor,
-        args.after,
-    )
+def cmd_stretch(args: argparse.Namespace) -> int:
+    """Print the patch with curves' knot times rescaled."""
+    what = f"stretch {' '.join(args.curves)} by {args.factor:g}"
+    return _edit(args.patch, what, stretch, args.curves, args.factor, args.after)
 
 
-def cmd_choke(args) -> int:
-    return _edit(args.patch, f"choke it at {args.ms:g} ms", P.choke, args.ms, args.release)
+def cmd_choke(args: argparse.Namespace) -> int:
+    """Print the patch with a damper that chokes it."""
+    return _edit(args.patch, f"choke it at {args.ms:g} ms", choke, args.ms, args.release)
 
 
-def cmd_softer(args) -> int:
-    return _edit(args.patch, f"make it {args.db:g} dB softer", P.softer, args.db, args.contact)
+def cmd_softer(args: argparse.Namespace) -> int:
+    """Print the same cymbal struck softer."""
+    return _edit(args.patch, f"make it {args.db:g} dB softer", softer, args.db, args.contact)
 
 
 def file_paths(out: str, files: int) -> list[Path]:
-    """`crash.wav` for one file; `crash_rr1.wav` … for several."""
+    """Name a set's files: `crash.wav` for one file; `crash_rr1.wav` … for several."""
     path = Path(out)
     if files == 1:
         return [path]
     return [path.with_name(f"{path.stem}_rr{j}{path.suffix or '.wav'}") for j in range(1, files + 1)]
 
 
-def cmd_render(args) -> int:
-    from .render import FORMATS, RenderError, db, export, render_takes
-
+def cmd_render(args: argparse.Namespace) -> int:
+    """Render a patch, its takes or its stereo pairs, and write the files unless they would clip."""
     p = _patch(args.patch)
     if args.allow_over and FORMATS[p.output.format] is not None:
         return _fail("--allow-over writes float32 only: PCM cannot hold samples beyond full scale")
     try:
-        audio, report = render_takes(p, args.takes, args.level_match, args.stereo)
+        audio, report = render_takes(p, args.takes, level_match=args.level_match, stereo=args.stereo)
     except RenderError as e:
         return _fail(f"{args.patch}: {e}")
     if not report.over or (args.allow_over and FORMATS[p.output.format] is None):
         # Every file first, then the report: a closed output never leaves a set half written.
         paths = file_paths(args.out, len(report.files))
-        for path, a, f in zip(paths, audio, report.files):
+        for path, a, f in zip(paths, audio, report.files, strict=True):
             export(path, a, p, report, f)
-        print(report)
-        for path in paths:
-            print(f"wrote {path}")
+        sys.stdout.write(f"{report}\n" + "".join(f"wrote {path}\n" for path in paths))
         return 0
-    print(report)
+    sys.stdout.write(f"{report}\n")
     if FORMATS[p.output.format] is not None:
         return _fail(
             f"not written: the peak is {db(report.peak):+.4f} dBFS, above {p.output.format}'s ceiling of "
@@ -125,18 +136,15 @@ def cmd_render(args) -> int:
     )
 
 
-def cmd_verify(args) -> int:
-    from .reference import verify
-
-    p = _patch(args.patch)
-    v = verify(p, takes=args.takes)
-    print(v)
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Compare a patch, or its takes, with the reference render."""
+    v = verify(_patch(args.patch), takes=args.takes)
+    sys.stdout.write(f"{v}\n")
     return 0 if v.passed else 1
 
 
-def cmd_extract(args) -> int:
-    from . import wav
-
+def cmd_extract(args: argparse.Namespace) -> int:
+    """Print the patch embedded in an exported WAV."""
     try:
         found = wav.chunks(args.wav)
     except (OSError, ValueError) as e:
@@ -147,16 +155,14 @@ def cmd_extract(args) -> int:
     return 0
 
 
-def cmd_audition(args) -> int:
-    from .audition import audition
-
-    return audition(
-        args.patches,
+def cmd_audition(args: argparse.Namespace) -> int:
+    """Play patches in a loop or a pattern."""
+    settings = Settings(
         watch=args.watch,
         bpm=args.bpm,
         every=args.every,
         pattern=args.pattern,
-        chokes=args.choke,
+        chokes=tuple(args.choke),
         release_ms=args.release,
         bed=args.bed,
         against=args.against,
@@ -164,82 +170,90 @@ def cmd_audition(args) -> int:
         takes=args.takes,
         stereo=args.stereo,
     )
+    return audition(args.patches, settings)
 
 
-def cmd_pack(args) -> int:
-    from .pack import pack
-
-    return pack(
-        args.groups,
-        args.out,
-        takes=args.takes,
-        stereo=args.stereo,
-        level_match=args.level_match,
-        chokes=args.choke,
-        release_ms=args.release,
-    )
+def cmd_pack(args: argparse.Namespace) -> int:
+    """Render a kit and write it, with its SFZ mapping."""
+    options = Options(args.takes, args.stereo, args.level_match, tuple(args.choke), args.release)
+    return pack(args.groups, args.out, options)
 
 
 def _finite(text: str) -> float:
+    """Parse a finite number."""
     try:
         x = float(text)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"expected a number, found {text!r}") from None
+        msg = f"expected a number, found {text!r}"
+        raise argparse.ArgumentTypeError(msg) from None
     if not math.isfinite(x):
-        raise argparse.ArgumentTypeError(f"expected a finite number, found {text!r}")
+        msg = f"expected a finite number, found {text!r}"
+        raise argparse.ArgumentTypeError(msg)
     return x
 
 
 def _note_value(text: str) -> float:
-    """A note value such as 1/16 or 4/1, in beats of a 4/4 bar (a quarter note is one beat)."""
+    """Parse a note value such as 1/16 or 4/1, in beats of a 4/4 bar (a quarter note is one beat)."""
     try:
         num, den = (int(part) for part in text.split("/"))
     except ValueError:
-        raise argparse.ArgumentTypeError(f"expected a note value such as 1/8 or 4/1, found {text!r}") from None
+        msg = f"expected a note value such as 1/8 or 4/1, found {text!r}"
+        raise argparse.ArgumentTypeError(msg) from None
     beats = 4 * num / den if den else 0
-    if not (1 / 8 <= beats <= 16):
-        raise argparse.ArgumentTypeError("note values run from 1/32 to 4/1")
+    if not (SHORTEST_BEATS <= beats <= LONGEST_BEATS):
+        msg = "note values run from 1/32 to 4/1"
+        raise argparse.ArgumentTypeError(msg)
     return beats
 
 
 def _pattern(text: str) -> tuple[int, ...]:
+    """Parse a pattern: patch numbers per step, 0 for a rest."""
     try:
         steps = tuple(int(s) for s in text.split(","))
     except ValueError:
-        raise argparse.ArgumentTypeError(f"expected patch numbers per step, such as 1,1,2,1 or 1,0,1,0, found {text!r}")
+        msg = f"expected patch numbers per step, such as 1,1,2,1 or 1,0,1,0, found {text!r}"
+        raise argparse.ArgumentTypeError(msg) from None
     if not steps or min(steps) < 0:
-        raise argparse.ArgumentTypeError("a pattern lists patch numbers from 1, with 0 for a rest")
+        msg = "a pattern lists patch numbers from 1, with 0 for a rest"
+        raise argparse.ArgumentTypeError(msg)
     return steps
 
 
 def _choke(text: str) -> tuple[int, tuple[int, ...]]:
+    """Parse a choke rule A:B,C, in which A is choked by B and C."""
     try:
         target, by = text.split(":")
         return int(target), tuple(int(b) for b in by.split(","))
     except ValueError:
-        raise argparse.ArgumentTypeError(f"expected A:B,C (A is choked by B and C), found {text!r}") from None
+        msg = f"expected A:B,C (A is choked by B and C), found {text!r}"
+        raise argparse.ArgumentTypeError(msg) from None
 
 
 def _group(text: str) -> tuple[int, tuple[str, ...]]:
+    """Parse a kit's key and its layers' patches, KEY=PATCH[,PATCH…]."""
     try:
-        key, patches = text.split("=", 1)
-        key = int(key)
+        name, patches = text.split("=", 1)
+        key = int(name)
     except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"expected KEY=PATCH[,PATCH…], such as 42=closed.toml, found {text!r}"
-        ) from None
-    if not 0 <= key <= 127:
-        raise argparse.ArgumentTypeError(f"MIDI keys run from 0 to 127, found {key}")
+        msg = f"expected KEY=PATCH[,PATCH…], such as 42=closed.toml, found {text!r}"
+        raise argparse.ArgumentTypeError(msg) from None
+    if not 0 <= key <= MAX_KEY:
+        msg = f"MIDI keys run from 0 to 127, found {key}"
+        raise argparse.ArgumentTypeError(msg)
     paths = tuple(p for p in patches.split(",") if p)
     if not paths:
-        raise argparse.ArgumentTypeError(f"key {key} needs at least one patch")
+        msg = f"key {key} needs at least one patch"
+        raise argparse.ArgumentTypeError(msg)
     return key, paths
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="brightwork", description="A one-voice hi-hat and cymbal synthesizer.")
-    sub = ap.add_subparsers(dest="command", required=True)
+def _release(p: argparse.ArgumentParser, what: str) -> None:
+    """Add a --release option: a choke's fade, or its fall."""
+    p.add_argument("--release", type=_finite, default=DEFAULT_RELEASE_MS, metavar="MS", help=f"{what} (default 40)")
 
+
+def _render_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add the commands that start, render, verify and extract patches."""
     p = sub.add_parser("init", help="print a complete starting patch")
     p.add_argument("reference", choices=REFERENCES)
     p.set_defaults(run=cmd_init)
@@ -251,7 +265,9 @@ def main(argv=None) -> int:
     p.add_argument("--stereo", action="store_true", help="two consecutive takes per file, as left and right")
     p.add_argument("--level-match", action="store_true", help="scale each file to the loudness of the first")
     p.add_argument(
-        "--allow-over", action="store_true", help="write a gain-mode render that exceeds full scale (float32)"
+        "--allow-over",
+        action="store_true",
+        help="write a gain-mode render that exceeds full scale (float32)",
     )
     p.set_defaults(run=cmd_render)
 
@@ -264,6 +280,9 @@ def main(argv=None) -> int:
     p.add_argument("wav")
     p.set_defaults(run=cmd_extract)
 
+
+def _edit_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add the editing commands, which print a complete patch."""
     p = sub.add_parser("pitch", help="print the patch with every frequency moved by semitones, or to a note")
     p.add_argument("patch")
     p.add_argument("amount", help="semitones such as +2 or -3.5, or a note such as D5 for tone[1]'s lowest partial")
@@ -284,9 +303,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("choke", help="print the patch with a damper that chokes it at a time")
     p.add_argument("patch")
     p.add_argument("ms", type=_finite, metavar="MS", help="when the damper starts")
-    p.add_argument(
-        "--release", type=_finite, default=P.DEFAULT_RELEASE_MS, metavar="MS", help="its 60 dB fall (default 40)"
-    )
+    _release(p, "its 60 dB fall")
     p.set_defaults(run=cmd_choke)
 
     p = sub.add_parser("softer", help="print the same cymbal struck DB softer")
@@ -295,6 +312,9 @@ def main(argv=None) -> int:
     p.add_argument("--contact", type=_finite, default=0.2, help="the contact exponent (default 0.2; 0 turns it off)")
     p.set_defaults(run=cmd_softer)
 
+
+def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add audition and pack, which play patches together."""
     p = sub.add_parser("audition", help="play patches in a loop or a pattern, with chokes, over a bed or a sample")
     p.add_argument("patches", nargs="+", metavar="PATCH")
     p.add_argument("--watch", action="store_true", help="re-render whenever a file changes")
@@ -302,11 +322,12 @@ def main(argv=None) -> int:
     p.add_argument("--every", type=_note_value, default=1.0, metavar="NOTE", help="the grid: 1/32 to 4/1 (default 1/4)")
     p.add_argument("--pattern", type=_pattern, help="patch numbers per step, 0 for a rest, such as 1,1,2,1")
     p.add_argument("--choke", type=_choke, action="append", default=[], metavar="A:B,…", help="A is choked by B, …")
+    _release(p, "a choke's fade")
     p.add_argument(
-        "--release", type=_finite, default=P.DEFAULT_RELEASE_MS, metavar="MS", help="a choke's fade (default 40)"
-    )
-    p.add_argument(
-        "--with", dest="bed", metavar="WAV", help="loop a bed under the hits: a whole number of bars at --bpm"
+        "--with",
+        dest="bed",
+        metavar="WAV",
+        help="loop a bed under the hits: a whole number of bars at --bpm",
     )
     p.add_argument("--against", metavar="WAV", help="alternate with a sample, hit by hit, matched in loudness")
     p.add_argument("--blind", action="store_true", help="with --against, play each pair in random order")
@@ -321,21 +342,28 @@ def main(argv=None) -> int:
     p.add_argument("--stereo", action="store_true")
     p.add_argument("--level-match", action="store_true")
     p.add_argument("--choke", type=_choke, action="append", default=[], metavar="KEY:KEY,…", help="e.g. 46:42,44")
-    p.add_argument(
-        "--release", type=_finite, default=P.DEFAULT_RELEASE_MS, metavar="MS", help="a choke's fade (default 40)"
-    )
+    _release(p, "a choke's fade")
     p.set_defaults(run=cmd_pack)
 
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the brightwork command, and return its exit status."""
+    ap = argparse.ArgumentParser(prog="brightwork", description="A one-voice hi-hat and cymbal synthesizer.")
+    sub = ap.add_subparsers(dest="command", required=True)
+    _render_commands(sub)
+    _edit_commands(sub)
+    _play_commands(sub)
     args = ap.parse_args(argv)
     if getattr(args, "bpm", None) is not None and not args.bpm > 0:
         ap.error("--bpm must be positive")
     try:
-        return args.run(args)
+        code: int = args.run(args)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
     except BrokenPipeError:  # the reader went away, as `brightwork render … | head` does: the files are written
         sys.stderr.close()
         return 0
+    return code
 
 
 if __name__ == "__main__":

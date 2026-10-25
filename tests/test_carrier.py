@@ -71,7 +71,7 @@ def test_interpolation_matches_direct_summation(base):
         tab = carrier.table(bins, amps, ip.rate)
         n = np.sort(np.random.default_rng(seed).integers(0, 8 * rate, 120))
         got = np.array(
-            [carrier.block(tab, ip, int(i) // carrier.BLOCK * carrier.BLOCK)[int(i) % carrier.BLOCK] for i in n]
+            [carrier.block(tab, ip, int(i) // carrier.BLOCK * carrier.BLOCK)[int(i) % carrier.BLOCK] for i in n],
         )
         assert np.max(np.abs(got - exact(bins, amps, n, rate))) <= 1e-13 * rms(amps)
 

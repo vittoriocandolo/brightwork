@@ -107,7 +107,7 @@ def main(argv=None) -> int:
             manifest["filters"][name] = entry
             print(
                 f"{name}: {h.size} taps, {entry['length_ms']:.2f} ms, 99% energy in {entry['energy99_ms']:.2f} ms, "
-                f"passband {entry['passband_db']:.1e} dB, stopband {entry['stopband_db']:.1f} dB"
+                f"passband {entry['passband_db']:.1e} dB, stopband {entry['stopband_db']:.1f} dB",
             )
             if args.check:
                 shipped = np.fromfile(DATA / entry["file"], dtype="<f8")

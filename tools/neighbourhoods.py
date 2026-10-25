@@ -32,11 +32,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from grid import set_path  # noqa: E402
+from grid import set_path
 
-from brightwork_synth.cli import REFERENCES, reference_text  # noqa: E402
-from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict  # noqa: E402
-from brightwork_synth.render import domain, synthesize  # noqa: E402
+from brightwork_synth.cli import REFERENCES, reference_text
+from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict
+from brightwork_synth.render import domain, synthesize
 
 STEPS = {
     "damping": [i / 4 for i in range(13)],
@@ -174,7 +174,7 @@ def main(argv=None) -> int:
                 continue
             print(
                 f"  {control:<11s} {text(lo, control)} [{why_lo}] – {text(hi, control)} [{why_hi}]"
-                f"   (reference {text(own, control)})"
+                f"   (reference {text(own, control)})",
             )
     return 0
 

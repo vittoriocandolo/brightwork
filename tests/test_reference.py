@@ -37,9 +37,9 @@ def test_the_reference_signal_is_the_shipping_model():
     rate, ip = 1536000, carrier.interpolator(48000, 16)
     tabs = V.tables(v, ip.rate)
     count = V.sample_count(v.t_src, rate)
-    whole = V.synthesize_x(v, rate, count, ip, tabs)
+    whole = V.synthesize_x(V.Model(v, ip, tabs), rate, count)
     for n0, n1 in ((-100, 5000), (12345, 99999), (count - 3000, count + 700)):
-        got = REF.x_range(v, rate, ip, tabs, n0, n1, count)
+        got = REF.x_range(V.Model(v, ip, tabs), rate, n0, n1, count)
         want = np.zeros(n1 - n0)
         a, b = max(n0, 0), min(n1, count)
         want[a - n0 : b - n0] = whole[a:b]
@@ -103,7 +103,7 @@ def test_kink_bound_is_an_upper_bound(rise_ms):
             "noise[2].level_db": 0.0,
             "noise[2].band_hz": [1000.0, 20000.0],
             "noise[2].amp": amp((0, 0), (rise_ms, 1), (rise_ms + 0.1, 0.7), (2, 0.1), (6, 0)),
-        }
+        },
     )
     v = REF.verify_take(p)
     bound = synthesize(p).kink

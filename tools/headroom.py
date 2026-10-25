@@ -39,10 +39,10 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import grid  # noqa: E402
+import grid
 
-from brightwork_synth.patch import from_dict  # noqa: E402
-from brightwork_synth.render import (  # noqa: E402
+from brightwork_synth.patch import from_dict
+from brightwork_synth.render import (
     DRIVE_MAX,
     FAMILY,
     HEADROOM_STEP_DB,
@@ -56,7 +56,17 @@ from brightwork_synth.render import (  # noqa: E402
     rates,
     render,
 )
-from brightwork_synth.voice import drive_alpha, kink_bound, kink_terms, sample_count, saturate, synthesize_x, tables, voice  # noqa: E402
+from brightwork_synth.voice import (
+    Model,
+    drive_alpha,
+    kink_bound,
+    kink_terms,
+    sample_count,
+    saturate,
+    synthesize_x,
+    tables,
+    voice,
+)
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB
@@ -73,7 +83,7 @@ class Fixture:
         self.taps = decimator(FAMILY[p.output.sample_rate]).taps
         ip = interpolator_for(p.output.sample_rate)
         tabs = tables(v, ip.rate)
-        self.x = synthesize_x(v, self.rate, sample_count(v.t_src, self.rate), ip, tabs)
+        self.x = synthesize_x(Model(v, ip, tabs), self.rate, sample_count(v.t_src, self.rate))
         self.kinks = kink_terms(v, ip, tabs)
         self.band = FAMILY[p.output.sample_rate] / 2
         u = np.concatenate(([0.0], self.x))  # every step from silence on
@@ -83,7 +93,7 @@ class Fixture:
         self.reach = np.minimum(np.abs(a), np.abs(b))
 
     def knee(self, alpha: float) -> float:
-        """q at α, measured directly: the largest step of αx that crosses zero or touches |αx| ≤ 1."""
+        """Q at α, measured directly: the largest step of αx that crosses zero or touches |αx| ≤ 1."""
         if not alpha:
             return 0.0
         counts = self.crosses | (self.reach <= 1.0 / alpha)
@@ -185,7 +195,7 @@ def run(args) -> None:
     if out.exists():
         # Rows whose fixture has changed since, such as a revoiced reference's ladder, are dropped and run again.
         current = {(fam, name): json.dumps(edits) for fam, name, edits in fixtures}
-        rows = list(csv.DictReader(open(out)))
+        rows = list(csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines()))
         kept = [r for r in rows if current.get((r["family"], r["name"])) == r["edits"]]
         if len(kept) < len(rows):
             print(f"dropping {len(rows) - len(kept)} rows whose fixtures changed", flush=True)
@@ -211,7 +221,7 @@ def run(args) -> None:
 
 
 def load(path) -> list[dict]:
-    rows = list(csv.DictReader(open(path)))
+    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in ("drive", "estimate", "reference", "error", "dense", "seconds"):
             r[key] = float(r[key])
@@ -223,7 +233,8 @@ def load(path) -> list[dict]:
 def split_infinite(rows) -> tuple[list, list, list]:
     """Of the fixtures whose status full renders never change within 0–48 dB: the silent ones (no headroom is
     reported for silence), the ones where the report is cautious (a finite edge where the status stays inside),
-    and the ones where it is wrong (anything else that disagrees)."""
+    and the ones where it is wrong (anything else that disagrees).
+    """
     silent, cautious, wrong = [], [], []
     for r in rows:
         if r["estimate"] == r["reference"]:
@@ -246,18 +257,18 @@ def analyze(args) -> None:
     print(
         f"  no change of status within 0–48 dB: {len(infinite)}; the report agrees on "
         f"{len(infinite) - len(silent) - len(cautious) - len(wrong)}, reports nothing for {len(silent)} silent ones, "
-        f"is cautious on {len(cautious)} and wrong on {len(wrong)}"
+        f"is cautious on {len(cautious)} and wrong on {len(wrong)}",
     )
     for r in cautious + wrong:
         print(
             f"    {'cautious' if r in cautious else 'WRONG'}: {r['family']}/{r['name']} at {r['drive']:.1f} dB: "
-            f"report {r['estimate']:.3f} dB, full renders {r['reference']}"
+            f"report {r['estimate']:.3f} dB, full renders {r['reference']}",
         )
     if finite:
         errors = np.array([r["error"] for r in finite])
         print(
             f"  an edge within 0–48 dB: {len(finite)}; error of the report (+ is optimistic): "
-            f"max {errors.max():+.5f} dB, min {errors.min():+.4f} dB, median {np.median(errors):+.5f} dB"
+            f"max {errors.max():+.5f} dB, min {errors.min():+.4f} dB, median {np.median(errors):+.5f} dB",
         )
         print(f"    exact to 0.001 dB: {int(np.sum(np.abs(errors) < 0.001))}")
         for lo, hi in ((0.001, 0.1), (0.1, 0.5), (0.5, 1.0), (1.0, math.inf)):
@@ -266,7 +277,7 @@ def analyze(args) -> None:
         near = [r for r in finite if abs(r["reference"] - r["drive"]) <= 3.0]
         if near:
             print(
-                f"  within 3 dB of the edge ({len(near)}): at most {-min(r['error'] for r in near):.3f} dB conservative"
+                f"  within 3 dB of the edge ({len(near)}): at most {-min(r['error'] for r in near):.3f} dB conservative",
             )
         for side, rs in (
             ("inside", [r for r in finite if r["inside"]]),
@@ -278,7 +289,7 @@ def analyze(args) -> None:
         for r in sorted(finite, key=lambda r: r["error"])[:5]:
             print(
                 f"    most conservative: {r['family']}/{r['name']} at {r['drive']:.1f} dB: "
-                f"report {r['estimate']:.3f}, full renders {r['reference']:.3f} dB"
+                f"report {r['estimate']:.3f}, full renders {r['reference']:.3f} dB",
             )
     dense = [r for r in rows if not math.isnan(r["dense"])]
     if dense:

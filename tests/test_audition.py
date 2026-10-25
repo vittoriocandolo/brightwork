@@ -68,7 +68,7 @@ def test_block_size_never_moves_a_hit():
     buf = np.random.default_rng(0).normal(size=333).astype(np.float32)
     outs = []
     for block in (1, 7, 64, 1000, 4096):
-        hits = A.Hits(RATE, bpm=97.0, every=0.5, pattern=(1, 0, 1, 1), chokes={0: {0}})
+        hits = A.Hits(RATE, A.Setup(bpm=97.0, every=0.5, pattern=(1, 0, 1, 1), chokes={0: {0}}))
         hits.offer(0, 0, [buf])
         outs.append(play(hits, 5000, block))
     for o in outs[1:]:
@@ -105,39 +105,39 @@ def test_older_generations_never_replace_newer_ones():
 def test_steps_of_any_note_value_never_drift():
     # At 120 bpm a beat is 500 samples: eighths every 250, a crash on 4/1 every four bars.
     for every, step in ((0.5, 250), (0.25, 125), (1.0, 500), (16.0, 8000)):
-        hits = A.Hits(RATE, bpm=120.0, every=every)
+        hits = A.Hits(RATE, A.Setup(bpm=120.0, every=every))
         hits.offer(0, 0, [ones(1)])
         out = play(hits, 4 * step + 1, 333)
         assert np.array_equal(np.flatnonzero(out), [0, step, 2 * step, 3 * step, 4 * step])
     # Fractional step lengths never drift: step n starts at round(n · every · rate · 60 / bpm).
-    hits = A.Hits(RATE, bpm=140.0, every=0.25)
+    hits = A.Hits(RATE, A.Setup(bpm=140.0, every=0.25))
     hits.offer(0, 0, [ones(1)])
     out = play(hits, 20000, 333)
     assert np.array_equal(np.flatnonzero(out), [round(i * 0.25 * RATE * 60 / 140) for i in range(187)])
 
 
 def test_overlapping_tails_sum():
-    hits = A.Hits(RATE, bpm=120.0)
+    hits = A.Hits(RATE, A.Setup(bpm=120.0))
     hits.offer(0, 0, [ones(900)])
     out = play(hits, 2000, 128)
     assert np.all(out[:500] == 1) and np.all(out[500:900] == 2) and np.all(out[900:1000] == 1)
 
 
 def test_a_pattern_names_the_patch_of_every_step():
-    hits = A.Hits(RATE, 2, bpm=120.0, every=0.5, pattern=(1, 1, 2, 0))
+    hits = A.Hits(RATE, A.Setup(2, bpm=120.0, every=0.5, pattern=(1, 1, 2, 0)))
     hits.offer(0, 0, [ones(1, 1.0)])
     hits.offer(1, 0, [ones(1, 2.0)])
     out = play(hits, 2000, 100)
     assert [out[250 * i] for i in range(8)] == [1, 1, 2, 0, 1, 1, 2, 0]
     # A patch that has not rendered yet rests on its steps.
-    hits = A.Hits(RATE, 2, bpm=120.0, every=0.5, pattern=(1, 2))
+    hits = A.Hits(RATE, A.Setup(2, bpm=120.0, every=0.5, pattern=(1, 2)))
     hits.offer(0, 0, [ones(1, 1.0)])
     out = play(hits, 1000, 100)
     assert [out[250 * i] for i in range(4)] == [1, 0, 1, 0]
 
 
 def test_patches_cycle_hit_by_hit_and_takes_cycle_within_each():
-    hits = A.Hits(RATE, 2, bpm=120.0)
+    hits = A.Hits(RATE, A.Setup(2, bpm=120.0))
     hits.offer(0, 0, [ones(1, 1.0), ones(1, 2.0)])
     hits.offer(1, 0, [ones(1, 10.0), ones(1, 20.0), ones(1, 30.0)])
     out = play(hits, 6000, 250)
@@ -149,7 +149,9 @@ def test_patches_cycle_hit_by_hit_and_takes_cycle_within_each():
 def test_a_choke_fades_the_ringing_hit_with_the_curve_choke_writes():
     # Patch 1 rings for 2 s; patch 2 chokes it at its step, 250 samples in, over a 40 ms release.
     ring, close = ones(2000, 1.0), ones(1, 0.0)
-    hits = A.Hits(RATE, 2, bpm=120.0, every=0.5, pattern=(1, 2, 0, 0, 0, 0, 0, 0), chokes={0: {1}}, release_ms=40.0)
+    hits = A.Hits(
+        RATE, A.Setup(2, bpm=120.0, every=0.5, pattern=(1, 2, 0, 0, 0, 0, 0, 0), chokes={0: {1}}, release_ms=40.0)
+    )
     hits.offer(0, 0, [ring])
     hits.offer(1, 0, [close])
     out = play(hits, 2000, 64)
@@ -162,7 +164,7 @@ def test_a_choke_fades_the_ringing_hit_with_the_curve_choke_writes():
     end = round(knots[-1][0])
     assert np.all(out[250 + end :] == 0.0)
     # A patch never chokes itself unless asked, and a choke only reaches hits already sounding.
-    hits = A.Hits(RATE, 2, bpm=120.0, every=0.5, pattern=(1, 1), chokes={0: {1}})
+    hits = A.Hits(RATE, A.Setup(2, bpm=120.0, every=0.5, pattern=(1, 1), chokes={0: {1}}))
     hits.offer(0, 0, [ones(600, 1.0)])
     hits.offer(1, 0, [ones(1, 0.0)])
     out = play(hits, 1000, 100)
@@ -171,7 +173,7 @@ def test_a_choke_fades_the_ringing_hit_with_the_curve_choke_writes():
 
 def test_stereo_takes_play_in_stereo_and_mono_hits_in_the_centre():
     pair = np.stack([ones(10, 1.0), ones(10, -1.0)], axis=1)
-    hits = A.Hits(RATE, 2, bpm=120.0, channels=2)
+    hits = A.Hits(RATE, A.Setup(2, bpm=120.0, channels=2))
     hits.offer(0, 0, [pair])
     hits.offer(1, 0, [ones(10, 0.5)])
     out = play(hits, 1000, 64)
@@ -188,7 +190,7 @@ def test_a_bed_loops_under_the_hits_on_the_tempo_grid():
     hat = ones(10, 0.5)
     outs = []
     for block in (1, 64, 333, 4096):
-        hits = A.Hits(RATE, bpm=bpm, every=0.5, bed=A.Bed(bed, RATE, bpm, 2))
+        hits = A.Hits(RATE, A.Setup(bpm=bpm, every=0.5, bed=A.Bed(bed, RATE, bpm, 2)))
         hits.offer(0, 0, [hat])
         outs.append(play(hits, 12000, block))
     for o in outs[1:]:
@@ -201,7 +203,7 @@ def test_a_bed_loops_under_the_hits_on_the_tempo_grid():
 
 def test_a_bed_a_little_short_of_whole_bars_never_drifts():
     bed = np.ones((3999, 1), dtype=np.float32)  # one sample short of two bars at 120 bpm
-    hits = A.Hits(RATE, bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 2))
+    hits = A.Hits(RATE, A.Setup(bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 2)))
     hits.offer(0, 0, [np.zeros(1, dtype=np.float32)])
     out = play(hits, 12000, 256)
     # Each loop restarts on the grid: the missing sample is a gap at the end of every period.
@@ -210,7 +212,7 @@ def test_a_bed_a_little_short_of_whole_bars_never_drifts():
 
 def test_a_stereo_bed_opens_a_stereo_stream_with_the_hits_centred():
     bed = np.stack([np.full(2000, 0.1), np.full(2000, -0.1)], axis=1).astype(np.float32)
-    hits = A.Hits(RATE, bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 1))
+    hits = A.Hits(RATE, A.Setup(bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 1)))
     hat = np.linspace(0, 1, 50, dtype=np.float32)
     hits.offer(0, 0, [hat])
     out = play(hits, 4000, 100)
@@ -230,7 +232,7 @@ def test_hits_alternate_between_the_render_and_the_sample():
 
 
 def test_blind_pairs_play_in_the_recorded_random_order():
-    hits = A.Hits(RATE, bpm=120.0, rng=random.Random(7))
+    hits = A.Hits(RATE, A.Setup(bpm=120.0, rng=random.Random(7)))
     hits.offer(0, 0, [ones(10, 1.0)], ones(10, 2.0))
     out = play(hits, 500 * 40, 128)
     played = [out[500 * i] for i in range(40)]
@@ -298,7 +300,7 @@ def test_pcm_patches_play_their_quantized_samples(tmp_path):
 
 def test_the_first_take_plays_while_the_others_render(example):
     audio, _ = render_takes(loads(EXAMPLE), 3)
-    session = A.Session(example, takes=3, out=Collect([]))
+    session = A.Session(example, A.Settings(takes=3), out=Collect([]))
     # The session starts with the first take alone; the set follows from the same generation.
     wait_for(lambda: session.hits._offers[0] is not None and session.hits._offers[0][0] == (0, 1))
     period = audio[0].size + 24000
@@ -313,7 +315,7 @@ def test_a_peak_mode_set_waits_for_all_its_takes(tmp_path):
     text = EXAMPLE.replace('mode        = "gain"', 'mode        = "peak"').replace("db          = -6.0", "db = -1.0")
     path.write_text(text)
     audio, _ = render_takes(loads(text), 3)
-    session = A.Session(path, takes=3, out=Collect([]))
+    session = A.Session(path, A.Settings(takes=3), out=Collect([]))
     assert session.hits._offers[0][0] == (0, 0) and len(session.hits._offers[0][1]) == 3
     heard = session.hits.fill(audio[0].size)
     assert np.array_equal(heard, audio[0])  # the set's own gain from the first hit
@@ -321,7 +323,7 @@ def test_a_peak_mode_set_waits_for_all_its_takes(tmp_path):
 
 def test_stereo_sessions_play_take_pairs(example):
     audio, _ = render_takes(loads(EXAMPLE), 1, stereo=True)
-    session = A.Session(example, stereo=True, out=Collect([]))
+    session = A.Session(example, A.Settings(stereo=True), out=Collect([]))
     assert session.hits.channels == 2
     heard = session.hits.fill(audio[0].shape[0])
     assert heard.shape == audio[0].shape and np.array_equal(heard, audio[0])
@@ -332,8 +334,8 @@ def test_several_patches_render_behind_the_first(tmp_path, example):
     other.write_text(OTHER)
     first, _ = render(loads(EXAMPLE))
     second, _ = render(loads(OTHER))
-    session = A.Session([example, other], bpm=120.0, every=0.5, pattern=(1, 2), out=Collect([]))
-    wait_for(lambda: session.buffers[1] is not None)
+    session = A.Session([example, other], A.Settings(bpm=120.0, every=0.5, pattern=(1, 2)), out=Collect([]))
+    wait_for(lambda: session.buffers[1])
     heard = np.concatenate([session.hits.fill(4800) for _ in range(10)])
     assert np.array_equal(heard[: first.size], first)  # step 1: the first patch
     step = 12000  # an eighth at 120 bpm
@@ -343,8 +345,10 @@ def test_several_patches_render_behind_the_first(tmp_path, example):
 def test_a_session_chokes_one_patch_with_another(tmp_path, example):
     ring = tmp_path / "open.toml"
     ring.write_text(EXAMPLE.replace("{ ms = 120.0, gain = 0.0 }", "{ ms = 900.0, gain = 0.0 }"))
-    session = A.Session([ring, example], bpm=120.0, every=0.5, pattern=(1, 2), chokes=[(1, (2,))], out=Collect([]))
-    wait_for(lambda: session.buffers[1] is not None)
+    session = A.Session(
+        [ring, example], A.Settings(bpm=120.0, every=0.5, pattern=(1, 2), chokes=((1, (2,)),)), out=Collect([])
+    )
+    wait_for(lambda: session.buffers[1])
     long, _ = render(loads(ring.read_text()))
     hat, _ = render(loads(EXAMPLE))
     heard = np.concatenate([session.hits.fill(4800) for _ in range(10)])
@@ -369,7 +373,7 @@ def test_audition_runs_until_interrupted_and_reports_what_it_cannot_play(example
 
     assert A.audition([example], stream_factory=Stream, out=Collect([])) == 0
     assert seen["rate"] == 48000 and seen["channels"] == 1
-    assert A.audition([example], stereo=True, stream_factory=Stream, out=Collect([])) == 0
+    assert A.audition([example], A.Settings(stereo=True), stream_factory=Stream, out=Collect([])) == 0
     assert seen["channels"] == 2
     example.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"))
     assert A.audition([example], stream_factory=Stream, out=Collect([])) == 1  # over full scale
@@ -410,7 +414,7 @@ def test_watcher_renders_only_the_newest_version(tmp_path):
 
 def test_watching_swaps_buffers_and_keeps_the_last_valid_one(example):
     log = []
-    session = A.Session(example, watch=True, out=Collect(log))
+    session = A.Session(example, A.Settings(watch=True), out=Collect(log))
     original = session.hits.fill(48000 // 2)  # the first hit starts playing
     assert session.hits.generation == 0
 
@@ -442,7 +446,7 @@ def test_a_session_matches_the_sample_and_plays_over_the_bed(tmp_path, example):
     sample = write_wav(tmp_path / "sample.wav", np.stack([other, other * 0.5], axis=1) * 0.3, 48000, "PCM_24")
     bed = write_wav(tmp_path / "bed.wav", np.full((96000, 2), 0.01), 48000)  # one bar at 120 bpm, stereo
     log = []
-    session = A.Session(example, bpm=120.0, bed=bed, against=sample, out=Collect(log))
+    session = A.Session(example, A.Settings(bpm=120.0, bed=bed, against=sample), out=Collect(log))
     text = "".join(log)
     assert "bed      " in text and "1 bar at 120 bpm, stereo" in text and "sample   plays at" in text
     assert session.hits.channels == 2
@@ -457,13 +461,13 @@ def test_a_session_matches_the_sample_and_plays_over_the_bed(tmp_path, example):
 def test_a_stereo_session_plays_a_stereo_sample_in_stereo(tmp_path, example):
     pair, _ = render_takes(loads(OTHER), 1, stereo=True)
     sample = write_wav(tmp_path / "sample.wav", pair[0] * 0.3, 48000)
-    session = A.Session(example, stereo=True, against=sample, out=Collect([]))
+    session = A.Session(example, A.Settings(stereo=True, against=sample), out=Collect([]))
     matched = session.hits._offers[0][2]
     assert matched.shape == pair[0].shape
     mine = render_takes(loads(EXAMPLE), 1, stereo=True)[1].files[0].loudness
     assert momentary_max(matched, 48000) == pytest.approx(mine, abs=0.01)
     mono = write_wav(tmp_path / "mono.wav", pair[0][:, 0] * 0.3, 48000)
-    centred = A.Session(example, stereo=True, against=mono, out=Collect([])).hits._offers[0][2]
+    centred = A.Session(example, A.Settings(stereo=True, against=mono), out=Collect([])).hits._offers[0][2]
     assert centred.shape[1] == 2 and np.array_equal(centred[:, 0], centred[:, 1])
 
 
@@ -471,7 +475,7 @@ def test_the_sample_is_rematched_on_every_re_render(tmp_path, example):
     other, _ = render(loads(OTHER))
     sample = write_wav(tmp_path / "sample.wav", other, 48000)
     log = []
-    session = A.Session(example, watch=True, against=sample, out=Collect(log))
+    session = A.Session(example, A.Settings(watch=True, against=sample), out=Collect(log))
     before = session.hits._offers[0][2]
     quieter = EXAMPLE.replace("db          = -6.0", "db          = -18.0")
     edit(example, quieter)
@@ -498,16 +502,16 @@ def test_a_session_refuses_what_it_cannot_play_faithfully(tmp_path, example):
         ({"pattern": (1, 0)}, "--pattern needs --bpm"),
         ({"bpm": 120.0, "pattern": (0, 0)}, "at least one hit"),
         ({"bpm": 120.0, "pattern": (1, 2)}, "names patch 2, but there are 1"),
-        ({"chokes": [(1, (1,))]}, "cannot choke itself"),
-        ({"chokes": [(1, (3,))]}, "patch 3 is not among the 1"),
+        ({"chokes": ((1, (1,)),)}, "cannot choke itself"),
+        ({"chokes": ((1, (3,)),)}, "patch 3 is not among the 1"),
     ):
         with pytest.raises(A.AuditionError, match=message):
-            A.Session(example, out=Collect([]), **kwargs)
+            A.Session(example, A.Settings(**kwargs), out=Collect([]))
     with pytest.raises(A.AuditionError, match="give one patch"):
-        A.Session([example, example], against=silent, out=Collect([]))
+        A.Session([example, example], A.Settings(against=silent), out=Collect([]))
     # 0.5 ms off whole bars is within tolerance.
     close = write_wav(tmp_path / "close.wav", np.full((96000 + 24, 1), 0.01), 48000)
-    A.Session(example, bpm=120.0, bed=close, out=Collect([]))
+    A.Session(example, A.Settings(bpm=120.0, bed=close), out=Collect([]))
 
 
 def test_audition_reveals_the_blind_order_when_it_stops(tmp_path, example):
@@ -527,7 +531,11 @@ def test_audition_reveals_the_blind_order_when_it_stops(tmp_path, example):
             return False
 
     code = A.audition(
-        [example], bpm=120.0, against=sample, blind=True, stream_factory=Stream, out=Collect(log), rng=random.Random(3)
+        [example],
+        A.Settings(bpm=120.0, against=sample, blind=True),
+        stream_factory=Stream,
+        out=Collect(log),
+        rng=random.Random(3),
     )
     text = "".join(log)
     assert code == 0 and "blind order (R = render, S = sample): 1:" in text
@@ -538,22 +546,22 @@ def test_clipping_is_flagged(tmp_path, example):
     loud = write_wav(tmp_path / "loud.wav", np.full((96000, 1), 0.9), 48000)
     quiet = write_wav(tmp_path / "quiet.wav", np.full((96000, 1), 0.01), 48000)
     log = []
-    A.Session(example, bpm=120.0, bed=loud, out=Collect(log))
+    A.Session(example, A.Settings(bpm=120.0, bed=loud), out=Collect(log))
     assert "warning: the hits over the bed peak at" in "".join(log)
     log = []
-    A.Session(example, bpm=120.0, bed=quiet, out=Collect(log))
+    A.Session(example, A.Settings(bpm=120.0, bed=quiet), out=Collect(log))
     assert "warning" not in "".join(log)
     # A quiet sample matched to a loud render would clip the device.
     other, _ = render(loads(OTHER))
     faint = write_wav(tmp_path / "faint.wav", other * 0.01 + np.pad([0.5], (0, other.size - 1)), 48000)
     log = []
-    A.Session(example, against=faint, out=Collect(log))
+    A.Session(example, A.Settings(against=faint), out=Collect(log))
     assert "which the device will clip" in "".join(log)
 
 
 def test_a_closed_session_renders_and_says_nothing_more(example):
     log = []
-    session = A.Session(example, watch=True, takes=2, out=Collect(log))
+    session = A.Session(example, A.Settings(watch=True, takes=2), out=Collect(log))
     session.close()
     count = len(log)
     edit(example, EXAMPLE.replace("db          = -6.0", "db          = -12.0"))

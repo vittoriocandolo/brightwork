@@ -36,6 +36,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import scipy.fft
@@ -44,9 +45,20 @@ from threadpoolctl import threadpool_limits
 
 from .spectrum import BINS_PER_HZ, PERIOD
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Sequence
+    from contextlib import AbstractContextManager
+
+    from numpy.typing import ArrayLike, NDArray
+
+type Floats = NDArray[np.float64]
+type Lines = tuple[NDArray[np.int64], NDArray[np.complex128]]  # a table's bins and complex amplitudes
+type Key = tuple[object, ...]  # what a table depends on
+
 PASS_HZ = 20000.0
 ATTENUATION_DB = 280.0
 BLOCK = 2**18  # internal samples per block; a multiple of every interpolation factor
+XI_FLOOR = 1e-12  # below it, I1(βξ)/ξ takes its limit β/2
 
 
 def table_rate(base: int) -> int:
@@ -54,19 +66,20 @@ def table_rate(base: int) -> int:
     return 2 * base
 
 
-def table(bins: np.ndarray, amps: np.ndarray, rate: int) -> np.ndarray:
-    """The carrier Σ |A_k| cos(2π k t/8 + arg A_k) at t = j / rate for one period, j = 0 … 8·rate − 1."""
+def table(bins: NDArray[np.int64], amps: NDArray[np.complex128], rate: int) -> Floats:
+    """Return the carrier Σ |A_k| cos(2π k t/8 + arg A_k) at t = j / rate for one period, j = 0 … 8·rate − 1."""
     n = rate * PERIOD
     spectrum = np.zeros(n // 2 + 1, dtype=complex)
     spectrum[bins] = (n / 2) * amps
-    return scipy.fft.irfft(spectrum, n=n)
+    out: Floats = scipy.fft.irfft(spectrum, n=n)
+    return out
 
 
 # Interpolators.
 
 
-def design(base: int, up: int, attenuation_db: float = ATTENUATION_DB) -> tuple[np.ndarray, int]:
-    """The interpolator from 2 × base to up × 2 × base: (taps, q), with 2·up·q + 1 taps and gain up.
+def design(base: int, up: int, attenuation_db: float = ATTENUATION_DB) -> tuple[Floats, int]:
+    """Design the interpolator from 2 × base to up × 2 × base: (taps, q), with 2·up·q + 1 taps and gain up.
 
     A Kaiser window for the attenuation, sized by Kaiser's formula for the
     transition from 20 kHz to R − 20 kHz, on a sinc cut off at R/2; q is the
@@ -74,7 +87,7 @@ def design(base: int, up: int, attenuation_db: float = ATTENUATION_DB) -> tuple[
     """
     rate = table_rate(base)
     dw = 2 * math.pi * (rate - 2 * PASS_HZ) / (up * rate)
-    n = int(math.ceil((attenuation_db - 7.95) / (2.285 * dw))) + 1
+    n = math.ceil((attenuation_db - 7.95) / (2.285 * dw)) + 1
     q = (n + 2 * up - 1) // (2 * up)
     n = 2 * up * q + 1
     m = np.arange(n) - (n - 1) / 2
@@ -82,16 +95,19 @@ def design(base: int, up: int, attenuation_db: float = ATTENUATION_DB) -> tuple[
 
 
 def kaiser_beta(attenuation_db: float) -> float:
+    """Return the Kaiser window's β for an attenuation above 50 dB, by Kaiser's formula."""
     return 0.1102 * (attenuation_db - 8.7)
 
 
 @dataclass(frozen=True)
 class Interpolator:
+    """An interpolator from a table at 2 × base up by `up`: its taps, reach q and polyphase matrix."""
+
     base: int
     up: int
     q: int
-    taps: np.ndarray
-    matrix: np.ndarray  # (2q + 2) × up polyphase matrix
+    taps: Floats
+    matrix: Floats  # (2q + 2) × up polyphase matrix
     sha256: str | None  # None for a design made on the fly (the reference rates)
     attenuation_db: float = ATTENUATION_DB
 
@@ -102,11 +118,13 @@ class Interpolator:
 
     @property
     def window(self) -> int:
-        return self.matrix.shape[0]
+        """How many table samples one output row reads."""
+        rows: int = self.matrix.shape[0]
+        return rows
 
 
-def polyphase(taps: np.ndarray, q: int, up: int) -> np.ndarray:
-    """P with output sample up·j + p = Σ_i x[j − q − 1 + i] · P[i, p]."""
+def polyphase(taps: Floats, q: int, up: int) -> Floats:
+    """Return P, with output sample up·j + p = Σ_i x[j − q − 1 + i] · P[i, p]."""
     off = (taps.size - 1) // 2
     rows = 2 * q + 2
     p = np.zeros((rows, up))
@@ -119,13 +137,16 @@ def polyphase(taps: np.ndarray, q: int, up: int) -> np.ndarray:
     return p
 
 
-def manifest() -> dict:
-    return json.loads(resources.files("brightwork_synth").joinpath("data", "interpolators.json").read_text())
+def manifest() -> dict[str, Any]:
+    """Read the frozen interpolators' manifest: each one's file, taps, reach and checksum."""
+    text = resources.files("brightwork_synth").joinpath("data", "interpolators.json").read_text()
+    data: dict[str, Any] = json.loads(text)
+    return data
 
 
 @functools.cache
 def interpolator(base: int, up: int) -> Interpolator:
-    """The frozen interpolator for a shipped factor, verified against its checksum, or a fresh design otherwise."""
+    """Return the frozen interpolator for a shipped factor, checked against its checksum, or else a fresh design."""
     entry = manifest()["filters"].get(f"{base}x{2 * up}")
     if entry is None:
         taps, q = design(base, up)
@@ -133,22 +154,24 @@ def interpolator(base: int, up: int) -> Interpolator:
         return Interpolator(base, up, q, taps, polyphase(taps, q, up), None)
     raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
     if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
-        raise RuntimeError(f"interpolator {base}x{2 * up} does not match its checksum")
+        msg = f"interpolator {base}x{2 * up} does not match its checksum"
+        raise RuntimeError(msg)
     taps = np.frombuffer(raw, dtype="<f8").astype(float)
     taps.flags.writeable = False
     return Interpolator(base, up, entry["q"], taps, polyphase(taps, entry["q"], up), entry["sha256"])
 
 
-def block(tab: np.ndarray, ip: Interpolator, n0: int, count: int = BLOCK) -> np.ndarray:
-    """Internal samples n0 … n0 + count − 1 of the carrier whose table is `tab`; n0 and count are multiples of up."""
+def block(tab: Floats, ip: Interpolator, n0: int, count: int = BLOCK) -> Floats:
+    """Return internal samples n0 … n0 + count − 1 of the carrier of table `tab`; n0 and count are multiples of up."""
     up, q = ip.up, ip.q
     j0, rows = n0 // up, count // up
     idx = np.arange(j0 - q - 1, j0 + rows + q + 1) % tab.size
     windows = np.ascontiguousarray(np.lib.stride_tricks.sliding_window_view(tab[idx], ip.window)[:rows])
-    return (windows @ ip.matrix).reshape(-1)
+    out: Floats = (windows @ ip.matrix).reshape(-1)
+    return out
 
 
-def span(tab: np.ndarray, ip: Interpolator, n0: int, n1: int):
+def span(tab: Floats, ip: Interpolator, n0: int, n1: int) -> Iterator[tuple[int, int, Floats]]:
     """Yield (a, b, samples) for the fixed blocks covering internal samples n0 ≤ n < n1, clipped to them."""
     first = n0 // BLOCK * BLOCK
     for b0 in range(first, n1, BLOCK):
@@ -157,22 +180,23 @@ def span(tab: np.ndarray, ip: Interpolator, n0: int, n1: int):
         yield a, b, values[a - b0 : b - b0]
 
 
-def single_threaded():
+def single_threaded() -> AbstractContextManager[object]:
     """Keep every matrix product on its caller's thread, so a sample never depends on how work is split."""
-    return threadpool_limits(limits=1, user_api="blas")
+    limits: AbstractContextManager[object] = threadpool_limits(limits=1, user_api="blas")
+    return limits
 
 
 # Values and slopes at arbitrary times, from the continuous windowed sinc.
 
 
-def _kernel(tau: np.ndarray, q: int, beta: float) -> tuple[np.ndarray, np.ndarray]:
-    """h(τ) = sinc(τ)·w(τ) and h′(τ), for |τ| ≤ q in table samples; w is the Kaiser window."""
+def _kernel(tau: Floats, q: int, beta: float) -> tuple[Floats, Floats]:
+    """Return h(τ) = sinc(τ)·w(τ) and h′(τ), for |τ| ≤ q in table samples; w is the Kaiser window."""
     xi = np.sqrt(np.maximum(0.0, 1.0 - (tau / q) ** 2))
     i0 = scipy.special.i0(beta)
     w = scipy.special.i0(beta * xi) / i0
     # w′ = I1(βξ)·β·dξ/dτ / I0(β), with dξ/dτ = −τ / (q² ξ); I1(βξ)/ξ → β/2 as ξ → 0.
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = np.where(xi > 1e-12, scipy.special.i1(beta * xi) / xi, beta / 2)
+        ratio = np.where(xi > XI_FLOOR, scipy.special.i1(beta * xi) / xi, beta / 2)
     dw = -beta * ratio * tau / (q * q * i0)
     s = np.sinc(tau)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -184,13 +208,14 @@ def _kernel(tau: np.ndarray, q: int, beta: float) -> tuple[np.ndarray, np.ndarra
 class Weights:
     """The continuous kernel's taps for some times: shared by every table at the same rate."""
 
-    index: np.ndarray  # table indices, one row per time
-    value: np.ndarray  # h(x − m)
-    slope: np.ndarray  # h′(x − m) · rate
+    index: NDArray[np.int64]  # table indices, one row per time
+    value: Floats  # h(x − m)
+    slope: Floats  # h′(x − m) · rate
 
 
-def weights(ip: Interpolator, t) -> Weights:
-    t = np.atleast_1d(np.asarray(t, dtype=float))
+def weights(ip: Interpolator, times: ArrayLike) -> Weights:
+    """Return the continuous kernel's taps at times in seconds, for any table at the interpolator's rate."""
+    t = np.atleast_1d(np.asarray(times, dtype=float))
     rate = ip.rate
     x = np.mod(t, PERIOD) * rate
     j = np.floor(x).astype(np.int64)
@@ -199,36 +224,40 @@ def weights(ip: Interpolator, t) -> Weights:
     return Weights(m % (PERIOD * rate), h, dh * rate)
 
 
-def at_weights(tab: np.ndarray, w: Weights) -> tuple[np.ndarray, np.ndarray]:
+def at_weights(tab: Floats, w: Weights) -> tuple[Floats, Floats]:
+    """Return a table's carrier and its time derivative at the times the weights were made for."""
     samples = tab[w.index]
     return np.sum(samples * w.value, axis=1), np.sum(samples * w.slope, axis=1)
 
 
-def at(tab: np.ndarray, ip: Interpolator, t) -> tuple[np.ndarray, np.ndarray]:
-    """The carrier and its time derivative at arbitrary times t, in seconds."""
-    return at_weights(tab, weights(ip, t))
+def at(tab: Floats, ip: Interpolator, times: ArrayLike) -> tuple[Floats, Floats]:
+    """Return the carrier and its time derivative at arbitrary times, in seconds."""
+    return at_weights(tab, weights(ip, times))
 
 
 # The table cache.
 
 CACHE_BYTES = 256 * 2**20
-_CACHE: dict[tuple, np.ndarray] = {}  # insertion order is recency: the most recently used last
+_CACHE: dict[tuple[Key, int], Floats] = {}  # insertion order is recency: the most recently used last
 _LOCK = threading.Lock()
 
 
-def tables(keys: list[tuple], rate: int, make) -> list[np.ndarray]:
-    """One read-only table per key at `rate`, computed in parallel and cached; make(i) gives the i-th key's
-    (bins, amps) when its table is missing."""
+def tables(keys: Sequence[Key], rate: int, make: Callable[[int], Lines]) -> list[Floats]:
+    """Return one read-only table per key at `rate`, computed in parallel and cached.
+
+    make(i) gives the i-th key's bins and amplitudes when its table is missing.
+    """
     ks = [(key, rate) for key in keys]
     with _LOCK:
-        todo, seen = [], set()
+        todo: list[tuple[tuple[Key, int], NDArray[np.int64], NDArray[np.complex128]]] = []
+        seen: set[tuple[Key, int]] = set()
         for i, k in enumerate(ks):
             if k not in _CACHE and k not in seen:
                 seen.add(k)
                 todo.append((k, *make(i)))
         if todo:
             with ThreadPoolExecutor(max_workers=min(len(todo), os.cpu_count() or 1)) as pool:
-                for (k, _, _), row in zip(todo, pool.map(lambda r: table(r[1], r[2], rate), todo)):
+                for (k, _, _), row in zip(todo, pool.map(lambda r: table(r[1], r[2], rate), todo), strict=True):
                     row.flags.writeable = False
                     _CACHE[k] = row
         for k in ks:
@@ -243,15 +272,19 @@ def tables(keys: list[tuple], rate: int, make) -> list[np.ndarray]:
         return [_CACHE[k] for k in ks]
 
 
-def cached(key: tuple, rate: int) -> bool:
+def cached(key: Key, rate: int) -> bool:
+    """Tell whether the table of `key` at `rate` is in the cache."""
     with _LOCK:
         return (key, rate) in _CACHE
 
 
 def clear_cache() -> None:
+    """Empty the table cache."""
     with _LOCK:
         _CACHE.clear()
 
 
-def frequencies(bins: np.ndarray) -> np.ndarray:
-    return bins / BINS_PER_HZ
+def frequencies(bins: NDArray[np.int64]) -> Floats:
+    """Return the frequencies of grid bins."""
+    out: Floats = bins / BINS_PER_HZ
+    return out

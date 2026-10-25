@@ -124,7 +124,7 @@ def test_calibration_sets_the_mean_square_to_one_half():
             assert math.fsum(gain2.tolist()) == pytest.approx(0.5, rel=1e-14)
     # Over takes the mean square of a wide band is ½.
     ms = [
-        0.5 * np.sum(np.abs(sp.calibrated(L.bins, L.amps, (2000.0, 9000.0), True)) ** 2)
+        0.5 * np.sum(np.abs(sp.calibrated(L.bins, L.amps, (2000.0, 9000.0), random=True)) ** 2)
         for L in (sp.noise_lines(4, t, 0.0) for t in range(1, 201))
     ]
     assert np.mean(ms) == pytest.approx(0.5, rel=0.005)
@@ -139,8 +139,8 @@ def test_editing_a_band_reweights_the_same_lines():
     for spacing in (0.0, 14.0):
         lines = sp.noise_lines(2, 3, spacing)
         f = lines.bins / sp.BINS_PER_HZ
-        a = sp.calibrated(lines.bins, lines.amps, (6000.0, 16000.0), True)
-        b = sp.calibrated(lines.bins, lines.amps, (5000.0, 12000.0), True)
+        a = sp.calibrated(lines.bins, lines.amps, (6000.0, 16000.0), random=True)
+        b = sp.calibrated(lines.bins, lines.amps, (5000.0, 12000.0), random=True)
         weight = np.sqrt(sp.band_power(5000.0, 12000.0, f) / sp.band_power(6000.0, 16000.0, f))
         ratio = (b / a) / weight  # the same lines, phases and draws: only a real weight and one constant differ
         np.testing.assert_allclose(ratio, ratio[0], rtol=1e-12)
@@ -155,12 +155,12 @@ def test_sources_correlate_as_their_bands_overlap():
     coherent, independent, spread = [], [], []
     for take in range(1, 201):
         n = sp.noise_lines(5, take, 0.0)
-        a = sp.calibrated(n.bins, n.amps, a_band, True)
-        b = sp.calibrated(n.bins, n.amps, b_band, True)
+        a = sp.calibrated(n.bins, n.amps, a_band, random=True)
+        b = sp.calibrated(n.bins, n.amps, b_band, random=True)
         coherent.append(float(np.real(np.vdot(b, a))))
         m = sp.noise_lines(5, take, 14.0)
         c = np.zeros(sp.BINS + 1, dtype=complex)
-        c[m.bins] = sp.calibrated(m.bins, m.amps, a_band, True)
+        c[m.bins] = sp.calibrated(m.bins, m.amps, a_band, random=True)
         independent.append(float(np.real(np.vdot(c[n.bins], a))))
         spread.append(float(np.sqrt(0.5 * np.sum(np.abs(a * c[n.bins]) ** 2))))
     f = n.bins / sp.BINS_PER_HZ
@@ -171,7 +171,7 @@ def test_sources_correlate_as_their_bands_overlap():
     assert 0.5 < expected < 0.95 and abs(np.mean(coherent) - expected) < 4 * sigma
     assert abs(np.mean(independent)) < 4 * np.mean(spread) / np.sqrt(200)
     # One band is one noise: the same lines, so the same carrier.
-    again = sp.calibrated(n.bins, n.amps, a_band, True)
+    again = sp.calibrated(n.bins, n.amps, a_band, random=True)
     assert np.array_equal(again, a)
 
 
@@ -217,7 +217,7 @@ def test_the_mix_between_centres_stays_near_the_power_law():
 
 def test_sub_bands_sum_to_the_source():
     lines = sp.noise_lines(9, 1, 0.0)
-    a = sp.calibrated(lines.bins, lines.amps, (300.0, 18000.0), True)
+    a = sp.calibrated(lines.bins, lines.amps, (300.0, 18000.0), random=True)
     parts = sp.split(lines.bins, a, sp.layout(300.0, 1.0, 0.0))
     total = np.zeros(sp.BINS + 1, dtype=complex)
     for p in parts:
