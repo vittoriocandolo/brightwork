@@ -259,6 +259,22 @@ def test_reads_beds_and_samples_but_rejects_other_formats(tmp_path: Path) -> Non
         wav.write(tmp_path / "x.wav", np.zeros((4, 3), dtype=np.float32), wav.Format(48000))
 
 
+def test_refuses_what_is_not_a_readable_wave(tmp_path: Path) -> None:
+    """Refuse a file that is not RIFF WAVE, one without its format or samples, and an impossible frame."""
+    path = tmp_path / "x.wav"
+    path.write_bytes(b"RIFX\x04\x00\x00\x00WAVE")
+    with pytest.raises(ValueError, match="not a RIFF WAVE file"):
+        wav.read(path)
+    path.write_bytes(b"RIFF\x04\x00\x00\x00WAVE")
+    with pytest.raises(ValueError, match="missing fmt or data chunk"):
+        wav.read(path)
+    fmt = struct.pack("<HHIIHH", 1, 1, 48000, 0, 0, 12)
+    body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", 0)
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    with pytest.raises(ValueError, match=r"unsupported format \(12-bit samples, 1 channel\)"):
+        wav.read(path)
+
+
 def test_every_rate_writes_a_valid_file(tmp_path: Path) -> None:
     """Write a valid file at every export rate."""
     for rate in (44100, 48000, 88200, 96000):
