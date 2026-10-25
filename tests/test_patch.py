@@ -7,7 +7,9 @@ import copy
 import dataclasses
 import datetime as dt
 import math
+import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -180,6 +182,13 @@ def test_dump_of_example_keeps_the_plan_layout() -> None:
         # The plan annotates its sources; the canonical comments name them by path.
         assert a.split("#")[0].rstrip() == b.split("#")[0].rstrip()
     assert ours[:4] == plan[:4]
+
+
+def test_the_plans_example_is_the_tests() -> None:
+    """Find the plan's example patch (§4) word for word the one these tests use."""
+    plan = (Path(__file__).resolve().parent.parent / "docs" / "PLAN.md").read_text(encoding="utf-8")
+    section = plan[plan.index("## 4. Patch") : plan.index("## 5. Domains")]
+    assert re.findall(r"```toml\n(.*?)```", section, flags=re.DOTALL)[0] == EXAMPLE
 
 
 def test_instrument_comes_first(example_dict: dict[str, Any]) -> None:

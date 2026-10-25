@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
+from brightwork_synth import patch, wav
 from brightwork_synth import spectrum as sp
 
 SIGNIFICANCE = 1e-3  # a statistical test fails below this p-value
@@ -280,3 +281,18 @@ def test_dither_is_triangular_and_never_reaches_one_lsb() -> None:
     d = sp.dither(11, 1, 200_000)
     assert np.all(np.abs(d) < 1)
     assert stats.kstest(d, stats.triang(c=0.5, loc=-1, scale=2).cdf).pvalue > SIGNIFICANCE
+
+
+def test_the_names_that_seed_and_mark_a_render_never_change() -> None:
+    """Pin the keys of every seeded stream, the patch's instrument and the WAV chunk: a new behavior takes a new key."""
+    keys = (sp.MODES_KEY, sp.STRIKE_KEY, sp.NOISE_KEY, sp.PHASE_KEY, sp.GRAINS_KEY, sp.DITHER_KEY)
+    assert keys == (
+        b"cymbal/modes/v1",
+        b"cymbal/strike/v1",
+        b"cymbal/noise/v1",
+        b"cymbal/phase/v1",
+        b"cymbal/grains/v1",
+        b"cymbal/dither/v1",
+    )
+    assert patch.INSTRUMENT == "cymbal"
+    assert wav.PRIVATE == b"cymb"

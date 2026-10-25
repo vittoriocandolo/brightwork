@@ -48,8 +48,8 @@ damping    = 0.0
 bloom      = 0.0
 chatter    = 0.0
 chatter_hz = 220.0
-grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
-grain_ms   = 10.0           # each collision rings down 60 dB in this time
+grains_hz  = 0.0
+grain_ms   = 10.0
 amp = [
   { ms = 0.0,  gain = 0.0 },
   { ms = 0.03, gain = 1.0 },
