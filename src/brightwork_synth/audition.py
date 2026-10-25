@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Mapping, Sequence
     from contextlib import AbstractContextManager
 
-    from numpy.typing import NDArray
+    from numpy.typing import ArrayLike, NDArray
 
 type Floats = NDArray[np.float64]
 type Audio = NDArray[np.float32]  # a buffer, mono or (frames, 2)
@@ -84,6 +84,14 @@ class Offer(NamedTuple):
     sample: Audio | None
 
 
+class Coin(Protocol):
+    """What decides each blind pair's order: anything with random() in [0, 1), such as a seeded generator."""
+
+    def random(self) -> float:
+        """Draw a number in [0, 1)."""
+        ...
+
+
 class Writer(Protocol):
     """Where audition says what it does: standard output, or a test's collector."""
 
@@ -95,7 +103,7 @@ class Writer(Protocol):
 class Done(Protocol):
     """What a watcher calls with each finished render: its generation, result and time, and whether it is newest."""
 
-    def __call__(self, generation: int, result: object, elapsed: float, *, newest: bool) -> None:
+    def __call__(self, generation: int, result: object, elapsed: float, /, *, newest: bool) -> None:
         """Take a finished render."""
         ...
 
@@ -146,7 +154,7 @@ class Bed:
     the hits, and plays as much of the bed as fits before the next start.
     """
 
-    def __init__(self, frames: Floats, rate: int, bpm: float, bars: int) -> None:
+    def __init__(self, frames: ArrayLike, rate: int, bpm: float, bars: int) -> None:
         """Keep the bed's frames, as float32, and its length in bars at a tempo."""
         self.frames = np.ascontiguousarray(frames, dtype=np.float32)
         self.channels: int = self.frames.shape[1]
@@ -214,7 +222,7 @@ class Setup:
     release_ms: float = DEFAULT_RELEASE_MS
     channels: int = 1
     bed: Bed | None = None
-    rng: random.Random | None = None
+    rng: Coin | None = None
 
 
 class Hits:
@@ -535,7 +543,7 @@ class Session:
         paths: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
         settings: Settings = DEFAULTS,
         *,
-        rng: random.Random | None = None,
+        rng: Coin | None = None,
         out: Writer | None = None,
     ) -> None:
         """Render the first patch, open the bed and the sample, and start watching every patch."""
@@ -768,7 +776,7 @@ def audition(
     *,
     out: Writer | None = None,
     stream_factory: Callable[[int, int, Fill], AbstractContextManager[object]] | None = None,
-    rng: random.Random | None = None,
+    rng: Coin | None = None,
 ) -> int:
     """Play the patches until interrupted; with `settings.watch`, re-render on every edit."""
     report = out or sys.stdout
