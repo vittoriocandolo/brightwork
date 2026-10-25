@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from scipy.signal import upfirdn
 
-from brightwork_synth import render
+from brightwork_synth import carrier, render
 
 from .conftest import make_tone
 
@@ -80,20 +80,35 @@ def test_the_snare_designs_ship_unchanged() -> None:
     assert design["passband_hz"] == PASS_HZ
 
 
+def tampered(raw: bytes) -> bytes:
+    """Flip one bit of a filter's bytes."""
+    out = bytearray(raw)
+    out[100] ^= 1
+    return bytes(out)
+
+
 @pytest.mark.parametrize(("base", "k"), [(44100, 32), (48000, 32), (48000, 16)])
 def test_checksum_is_enforced(base: int, k: int) -> None:
     """Load a decimator's taps only when they match their checksum, and keep them read-only."""
     entry = render.manifest()["filters"][f"{base}x{k}"]
     raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == entry["sha256"]
-    assert np.array_equal(render.load_taps(raw, entry), render.decimator(base, k).taps)
-    tampered = bytearray(raw)
-    tampered[100] ^= 1
-    with pytest.raises(render.RenderError):
-        render.load_taps(bytes(tampered), entry)
-    with pytest.raises(render.RenderError):
-        render.load_taps(raw[:-8], entry)
+    assert np.array_equal(carrier.load_taps(raw, entry, "decimator"), render.decimator(base, k).taps)
+    for bad in (tampered(raw), raw[:-8]):
+        with pytest.raises(RuntimeError, match="decimator does not match its checksum"):
+            carrier.load_taps(bad, entry, "decimator")
     assert not render.decimator(base, k).taps.flags.writeable
+
+
+@pytest.mark.parametrize("name", list(carrier.manifest()["filters"]))
+def test_interpolator_checksums_are_enforced(name: str) -> None:
+    """Load a shipped interpolator's taps only when they match their checksum."""
+    entry = carrier.manifest()["filters"][name]
+    raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
+    base, factor = map(int, name.split("x"))
+    assert np.array_equal(carrier.load_taps(raw, entry, name), carrier.interpolator(base, factor // 2).taps)
+    with pytest.raises(RuntimeError, match=f"{name} does not match its checksum"):
+        carrier.load_taps(tampered(raw), entry, name)
 
 
 def test_timing_contract_on_synthetic_input() -> None:

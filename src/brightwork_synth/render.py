@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-import hashlib
 import json
 import math
 import os
@@ -118,22 +117,13 @@ def manifest() -> dict[str, Any]:
     return data
 
 
-def load_taps(raw: bytes, entry: dict[str, Any]) -> Floats:
-    """Return coefficients from their shipped bytes, refused unless they match the checksum."""
-    if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
-        msg = f"decimator {entry['base']}x{entry['K']} does not match its checksum"
-        raise RenderError(msg)
-    taps = np.frombuffer(raw, dtype="<f8").astype(float)
-    taps.flags.writeable = False
-    return taps
-
-
 @functools.cache
 def decimator(base: int, k: int = K) -> Decimator:
     """Return a frozen decimator from brightwork_synth/data, checked against its checksum."""
     entry = manifest()["filters"][f"{base}x{k}"]
     raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
-    return Decimator(base, k, load_taps(raw, entry), entry["sha256"], entry["stopband_db"])
+    taps = carrier.load_taps(raw, entry, f"decimator {base}x{k}")
+    return Decimator(base, k, taps, entry["sha256"], entry["stopband_db"])
 
 
 # The decimator as matrix products.

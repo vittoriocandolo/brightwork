@@ -43,7 +43,7 @@ import scipy.fft
 import scipy.special
 from threadpoolctl import threadpool_limits
 
-from .spectrum import BINS_PER_HZ, PERIOD
+from .spectrum import PERIOD
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -144,6 +144,16 @@ def manifest() -> dict[str, Any]:
     return data
 
 
+def load_taps(raw: bytes, entry: dict[str, Any], name: str) -> Floats:
+    """Return a frozen filter's coefficients from their shipped bytes, refused unless they match the checksum."""
+    if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
+        msg = f"{name} does not match its checksum: reinstall Brightwork"
+        raise RuntimeError(msg)
+    taps = np.frombuffer(raw, dtype="<f8").astype(float)
+    taps.flags.writeable = False
+    return taps
+
+
 @functools.cache
 def interpolator(base: int, up: int) -> Interpolator:
     """Return the frozen interpolator for a shipped factor, checked against its checksum, or else a fresh design."""
@@ -153,11 +163,7 @@ def interpolator(base: int, up: int) -> Interpolator:
         taps.flags.writeable = False
         return Interpolator(base, up, q, taps, polyphase(taps, q, up), None)
     raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
-        msg = f"interpolator {base}x{2 * up} does not match its checksum"
-        raise RuntimeError(msg)
-    taps = np.frombuffer(raw, dtype="<f8").astype(float)
-    taps.flags.writeable = False
+    taps = load_taps(raw, entry, f"interpolator {base}x{2 * up}")
     return Interpolator(base, up, entry["q"], taps, polyphase(taps, entry["q"], up), entry["sha256"])
 
 
@@ -282,9 +288,3 @@ def clear_cache() -> None:
     """Empty the table cache."""
     with _LOCK:
         _CACHE.clear()
-
-
-def frequencies(bins: NDArray[np.int64]) -> Floats:
-    """Return the frequencies of grid bins."""
-    out: Floats = bins / BINS_PER_HZ
-    return out

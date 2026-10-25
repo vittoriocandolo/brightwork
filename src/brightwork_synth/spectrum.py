@@ -158,12 +158,6 @@ class Lines:
     bins: np.ndarray  # ascending, 1 … BINS, unique
     amps: np.ndarray  # complex: |A| e^{iθ}, before γ and the band
 
-    @property
-    def hz(self) -> Floats:
-        """The lines' frequencies."""
-        out: Floats = self.bins / BINS_PER_HZ
-        return out
-
 
 def cells_below_top(spacing: float) -> int:
     """Count the cells of width `spacing` that start below 20 kHz."""
