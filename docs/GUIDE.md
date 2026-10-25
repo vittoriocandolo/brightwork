@@ -397,6 +397,28 @@ The General MIDI keys are the natural map: 42 closed hi-hat, 44 pedal, 46
 open, 49 and 57 crash, 51 and 59 ride, 53 ride bell, 52 china, 55 splash. Kits
 have been checked in sfizz and liquidsfz (VALIDATION.md).
 
+### In a DAW
+
+- **One file.** Every WAV works on its own: drop it on a drum pad or a
+  sampler. A patch with a tone carries its root key in a `smpl` chunk, so
+  samplers map it to its note; noise alone has no pitch, and no root key.
+  Hats choke each other only if the pads do: put the closed, pedal and open
+  hats in one choke group, as Ableton Live's Drum Rack calls it, or the same
+  cut group in FL Studio.
+- **A kit.** The SFZ map that `pack` writes plays the whole kit as one
+  instrument, velocity layers, round robins and chokes included, in any SFZ
+  player loaded on an instrument track, such as the free sfizz or
+  Sforzando, both of which run as plugins in FL Studio, Ableton Live and
+  Logic Pro. The map names its samples by file name, so keep it in its
+  folder beside them, as `pack` writes it. The levels follow the square law
+  across layers from the map itself, so a pattern's velocities play as
+  written.
+- **Keys.** The map uses General MIDI's numbers, so drum patterns and pad
+  controllers find the hats where they expect them. Brightwork names notes as
+  scientific pitch does, with middle C, key 60, as C4: key 42, the closed
+  hat, is F#2. DAWs that call middle C C3, such as Ableton Live, Cubase and
+  Logic Pro, call it F#1.
+
 ## Outside the family
 
 - Gongs and tam-tams, whose pitch glides and whose tails outlast 8 s; bells,
