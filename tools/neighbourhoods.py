@@ -16,7 +16,7 @@ after its peak. Drive is not scanned: every reference renders without drive,
 and its extent is the smallest drive headroom that tools/references.py
 reports over all its takes, which is exact or cautious.
 
-    python tools/neighbourhoods.py [--seeds 4] [--takes 4]
+    uv run python -m tools.neighbourhoods [--seeds 4] [--takes 4]
 """
 
 from __future__ import annotations
@@ -27,16 +27,11 @@ import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from grid import set_path
 
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict
 from brightwork_synth.render import domain, synthesize
+from tools.grid import set_path
 
 STEPS = {
     "damping": [i / 4 for i in range(13)],

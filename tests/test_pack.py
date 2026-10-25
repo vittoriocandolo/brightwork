@@ -4,13 +4,13 @@
 import dataclasses
 import math
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile
 
-from brightwork_synth import cli, wav
-from brightwork_synth import pack as K
+from brightwork_synth import cli, pack, wav
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import dumps, loads, softer
 
@@ -53,38 +53,40 @@ def ladder(name, steps):
 def hats():
     """A hi-hat kit: three closed layers, a pedal, and two open layers choked by both."""
     groups = [(42, ladder("closed", (0, 8, 16))), (44, ladder("pedal", (0,))), (46, ladder("open", (0, 12)))]
-    return K.build(groups, K.Options(takes=2, chokes=((46, (42, 44)),)))
+    return pack.build(groups, pack.Options(takes=2, chokes=((46, (42, 44)),)))
 
 
 @pytest.fixture(scope="module")
 def written(hats, tmp_path_factory):
     out = tmp_path_factory.mktemp("hats")
-    return out, K.write(hats, out)
+    return out, pack.write(hats, out)
 
 
-def test_velocity_ranges_follow_the_square_law():
-    ranges = K.velocity_ranges([0.0, -6.0, -12.0, -24.0])
-    assert ranges[0][1] == 127 and ranges[-1][0] == 1
+def test_velocity_ranges_follow_the_square_law() -> None:
+    ranges = pack.velocity_ranges([0.0, -6.0, -12.0, -24.0])
+    assert ranges[0][1] == 127
+    assert ranges[-1][0] == 1
     for (lo, _), (_, hi) in zip(ranges, ranges[1:]):
         assert hi == lo - 1  # contiguous, no gaps and no overlaps
     # A layer 6 dB down sits where 40·log10(v/127) = −6: v ≈ 90; neighbours meet halfway in dB.
     natural = 127 * 10 ** (-6 / 40)
     assert ranges[1][0] <= natural <= ranges[1][1]
     assert ranges[0][0] == math.floor(math.sqrt(127 * natural)) + 1
-    with pytest.raises(K.PackError):
-        K.velocity_ranges([0.0, -0.001, -0.002])
+    with pytest.raises(pack.PackError):
+        pack.velocity_ranges([0.0, -0.001, -0.002])
 
 
-def test_the_curve_puts_each_layer_on_the_square_law():
+def test_the_curve_puts_each_layer_on_the_square_law() -> None:
     for relative in (0.0, -5.0, -17.5):
         lo, hi = 40, 90
-        volume, curve = K.curve_for(relative, lo, hi)
-        assert max(curve) == 1.0 and min(curve) > 0
+        volume, curve = pack.curve_for(relative, lo, hi)
+        assert max(curve) == 1.0
+        assert min(curve) > 0
         for v, c in zip(range(lo, hi + 1), curve):
             assert relative + volume + 20 * math.log10(c) == pytest.approx(40 * math.log10(v / 127), abs=1e-9)
 
 
-def test_every_key_velocity_and_take_maps_to_exactly_one_file(written):
+def test_every_key_velocity_and_take_maps_to_exactly_one_file(written) -> None:
     out, files = written
     text = sfz(out).read_text()
     rs = regions(text)
@@ -100,13 +102,14 @@ def test_every_key_velocity_and_take_maps_to_exactly_one_file(written):
                     and int(r["lovel"]) <= v <= int(r["hivel"])
                     and int(r["seq_position"]) == position
                 ]
-                assert len(hits) == 1 and hits[0]["seq_length"] == "2"
+                assert len(hits) == 1
+                assert hits[0]["seq_length"] == "2"
                 assert (out / hits[0]["sample"]).exists()
     assert {p.name for p in files} == {r["sample"] for r in rs} | {sfz(out).name}
     assert all(re.fullmatch(r"(42|44|46)_[a-z]+(-\d+)?_v\d+_rr[12]\.wav", r["sample"]) for r in rs)
 
 
-def test_chokes_as_declared(written):
+def test_chokes_as_declared(written) -> None:
     out, _ = written
     rs = regions(sfz(out).read_text())
     by_key = {k: [r for r in rs if r["key"] == str(k)] for k in (42, 44, 46)}
@@ -114,28 +117,30 @@ def test_chokes_as_declared(written):
     assert len(groups) == 1  # the closed and pedal hats are one choke group
     (group,) = groups
     for r in by_key[46]:
-        assert r["off_by"] == group and r["off_mode"] == "normal" and float(r["ampeg_release"]) == 0.04
+        assert r["off_by"] == group
+        assert r["off_mode"] == "normal"
+        assert float(r["ampeg_release"]) == 0.04
         assert "group" not in r  # the open hat chokes nothing
     assert all("off_by" not in r for k in (42, 44) for r in by_key[k])
 
 
-def test_choke_rules_are_checked():
-    assert K.choke_groups([(46, (42, 44))], [42, 44, 46]) == {42: (1, None), 44: (1, None), 46: (None, 1)}
+def test_choke_rules_are_checked() -> None:
+    assert pack.choke_groups([(46, (42, 44))], [42, 44, 46]) == {42: (1, None), 44: (1, None), 46: (None, 1)}
     # Rules for one target add up, and targets choked by the same keys share their group.
-    roles = K.choke_groups([(46, (42,)), (46, (44,)), (49, (42, 44))], [42, 44, 46, 49])
+    roles = pack.choke_groups([(46, (42,)), (46, (44,)), (49, (42, 44))], [42, 44, 46, 49])
     assert roles == {42: (1, None), 44: (1, None), 46: (None, 1), 49: (None, 1)}
     # Two keys can choke each other.
-    assert K.choke_groups([(46, (42,)), (42, (46,))], [42, 46]) == {42: (1, 2), 46: (2, 1)}
+    assert pack.choke_groups([(46, (42,)), (42, (46,))], [42, 46]) == {42: (1, 2), 46: (2, 1)}
     for rules, message in (
         ([(46, (40,))], "key 40 is not in the kit"),
         ([(46, (46,))], "cannot choke itself"),
         ([(46, (42, 44)), (49, (42,))], "key 42 would need two choke groups"),
     ):
-        with pytest.raises(K.PackError, match=message):
-            K.choke_groups(rules, [42, 44, 46, 49])
+        with pytest.raises(pack.PackError, match=message):
+            pack.choke_groups(rules, [42, 44, 46, 49])
 
 
-def test_the_level_follows_the_square_law_on_every_key(hats, written):
+def test_the_level_follows_the_square_law_on_every_key(hats, written) -> None:
     out, _ = written
     text = sfz(out).read_text()
     rate = hats.keys[0].layers[0].patch.output.sample_rate
@@ -161,10 +166,11 @@ def test_the_level_follows_the_square_law_on_every_key(hats, written):
         # Within one velocity step across every boundary.
         step = {v: 40 * math.log10((v + 1) / v) for v in range(1, 127)}
         for (v0, l0), (v1, l1) in zip(levels, levels[1:]):
-            assert v1 == v0 + 1 and 0 < l1 - l0 <= step[v0] + 0.02
+            assert v1 == v0 + 1
+            assert 0 < l1 - l0 <= step[v0] + 0.02
 
 
-def test_files_carry_their_key_layer_and_take(hats, written):
+def test_files_carry_their_key_layer_and_take(hats, written) -> None:
     out, _ = written
     for k in hats.keys:
         for i, layer in enumerate(k.layers, 1):
@@ -185,27 +191,29 @@ def test_files_carry_their_key_layer_and_take(hats, written):
                 assert meta["set_gain_db"] == hats.set_gain_db
 
 
-def test_the_report_lists_every_key_and_its_chokes(hats):
+def test_the_report_lists_every_key_and_its_chokes(hats) -> None:
     text = "\n".join(hats.lines("hats"))
     assert "3 keys, 12 files in hats" in text
-    assert "key 42" in text and "layer 3 closed-16" in text and "choked by keys 42, 44, over 40 ms" in text
+    assert "key 42" in text
+    assert "layer 3 closed-16" in text
+    assert "choked by keys 42, 44, over 40 ms" in text
     assert text.count("inside, worst margin") == 6
 
 
-def test_a_kit_shares_one_gain():
+def test_a_kit_shares_one_gain() -> None:
     peak = dataclasses.replace(loads(cli.reference_text("closed")).output, mode="peak", db=-1.0)
     groups = [
         (key, [(n, dataclasses.replace(p, output=peak)) for n, p in layers])
         for key, layers in ((42, ladder("closed", (0, 10))), (46, ladder("open", (0,))))
     ]
-    kit = K.build(groups, K.Options(takes=2))
+    kit = pack.build(groups, pack.Options(takes=2))
     peaks = [float(np.max(np.abs(a))) for k in kit.keys for row in k.audio for a in row]
     assert 20 * math.log10(max(peaks)) == pytest.approx(-1.0, abs=1e-6)
     assert len({round(p, 9) for p in peaks}) == len(peaks)  # the others keep their natural levels
 
 
-def test_level_matching_within_each_layer():
-    kit = K.build([(42, ladder("closed", (0, 8)))], K.Options(takes=4, level_match=True))
+def test_level_matching_within_each_layer() -> None:
+    kit = pack.build([(42, ladder("closed", (0, 8)))], pack.Options(takes=4, level_match=True))
     for layer, files in zip(kit.keys[0].layers, kit.keys[0].audio):
         rate = layer.patch.output.sample_rate
         first = momentary_max(files[0], rate)
@@ -213,43 +221,45 @@ def test_level_matching_within_each_layer():
         assert layer.spread < 0.01
 
 
-def test_a_stereo_kit_pairs_consecutive_takes(tmp_path):
-    kit = K.build([(42, ladder("closed", (0, 12)))], K.Options(takes=2, stereo=True))
-    files = K.write(kit, tmp_path)
+def test_a_stereo_kit_pairs_consecutive_takes(tmp_path: Path) -> None:
+    kit = pack.build([(42, ladder("closed", (0, 12)))], pack.Options(takes=2, stereo=True))
+    files = pack.write(kit, tmp_path)
     layer = kit.keys[0].layers[0]
     assert layer.takes == ((1, 2), (3, 4))
     data, _ = soundfile.read(tmp_path / layer.files(42)[1], dtype="float32")
-    assert data.shape[1] == 2 and wav.read(tmp_path / layer.files(42)[1]).meta["takes"] == [3, 4]
-    assert "seq_length=2" in sfz(tmp_path).read_text() and len(files) == 5
+    assert data.shape[1] == 2
+    assert wav.read(tmp_path / layer.files(42)[1]).meta["takes"] == [3, 4]
+    assert "seq_length=2" in sfz(tmp_path).read_text()
+    assert len(files) == 5
 
 
-def test_a_kit_re_renders_bit_identically(tmp_path):
+def test_a_kit_re_renders_bit_identically(tmp_path: Path) -> None:
     groups = [(42, ladder("closed", (0, 12))), (46, ladder("open", (0,)))]
     for d in ("a", "b"):
-        K.write(K.build(groups, K.Options(takes=2, chokes=((46, (42,)),)), stem="kit"), tmp_path / d)
+        pack.write(pack.build(groups, pack.Options(takes=2, chokes=((46, (42,)),)), stem="kit"), tmp_path / d)
     names = sorted(f.name for f in (tmp_path / "a").iterdir())
     assert len(names) == 7
     for name in names:
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes()
 
 
-def test_kits_refuse_what_they_cannot_map():
+def test_kits_refuse_what_they_cannot_map() -> None:
     (_, loud), (_, soft) = ladder("closed", (0, 8))
-    with pytest.raises(K.PackError, match="not softer"):
-        K.build([(42, [("soft", soft), ("loud", loud)])])
+    with pytest.raises(pack.PackError, match="not softer"):
+        pack.build([(42, [("soft", soft), ("loud", loud)])])
     other = dataclasses.replace(soft, output=dataclasses.replace(soft.output, sample_rate=44100))
-    with pytest.raises(K.PackError, match="output.sample_rate"):
-        K.build([(42, [("loud", loud)]), (44, [("other", other)])])
+    with pytest.raises(pack.PackError, match="output.sample_rate"):
+        pack.build([(42, [("loud", loud)]), (44, [("other", other)])])
     silent = dataclasses.replace(soft, noise=tuple(dataclasses.replace(n, level_db=-math.inf) for n in soft.noise))
-    with pytest.raises(K.PackError, match="silent"):
-        K.build([(42, [("loud", loud), ("silent", silent)])])
-    with pytest.raises(K.PackError, match="given twice"):
-        K.build([(42, [("loud", loud)]), (42, [("soft", soft)])])
-    with pytest.raises(K.PackError, match="--takes"):
-        K.build([(42, [("loud", loud)])], K.Options(takes=65, stereo=True))
+    with pytest.raises(pack.PackError, match="silent"):
+        pack.build([(42, [("loud", loud), ("silent", silent)])])
+    with pytest.raises(pack.PackError, match="given twice"):
+        pack.build([(42, [("loud", loud)]), (42, [("soft", soft)])])
+    with pytest.raises(pack.PackError, match="--takes"):
+        pack.build([(42, [("loud", loud)])], pack.Options(takes=65, stereo=True))
 
 
-def test_the_command_writes_a_kit(tmp_path, capsys):
+def test_the_command_writes_a_kit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     paths = {}
     for name, p in ladder("closed", (0, 8)) + ladder("open", (0,)):
         paths[name] = tmp_path / f"{name}.toml"
@@ -258,9 +268,15 @@ def test_the_command_writes_a_kit(tmp_path, capsys):
     args = ["pack", f"42={paths['closed']},{paths['closed-8']}", f"46={paths['open']}", "--choke", "46:42"]
     code = cli.main([*args, "--takes", "2", "--out", str(out)])
     text = capsys.readouterr().out
-    assert code == 0 and "2 keys, 6 files in" in text and "velocities" in text and "choked by key 42" in text
-    assert (out / "hats.sfz").exists() and len(list(out.glob("*.wav"))) == 6
+    assert code == 0
+    assert "2 keys, 6 files in" in text
+    assert "velocities" in text
+    assert "choked by key 42" in text
+    assert (out / "hats.sfz").exists()
+    assert len(list(out.glob("*.wav"))) == 6
     code = cli.main(["pack", f"42={paths['closed-8']},{paths['closed']}", "--out", str(tmp_path / "bad")])
-    assert code == 2 and "not softer" in capsys.readouterr().err
+    assert code == 2
+    assert "not softer" in capsys.readouterr().err
     code = cli.main(["pack", f"42={paths['closed']}", "--choke", "46:42", "--out", str(tmp_path / "bad")])
-    assert code == 2 and "key 46 is not in the kit" in capsys.readouterr().err
+    assert code == 2
+    assert "key 46 is not in the kit" in capsys.readouterr().err

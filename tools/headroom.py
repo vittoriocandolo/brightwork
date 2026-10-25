@@ -18,8 +18,8 @@ on: the saturator, the decimator and the output peak, the knee slew
 measured directly on x, and the kink bound at that drive. Nothing comes from
 the report's frontier or its probes.
 
-    python tools/headroom.py run [--out docs/grid/headroom.csv] [--dense]
-    python tools/headroom.py analyze docs/grid/headroom.csv
+    uv run python -m tools.headroom run [--out docs/grid/headroom.csv] [--dense]
+    uv run python -m tools.headroom analyze docs/grid/headroom.csv
 
 A run appends to its CSV and skips fixtures already there, so it can resume.
 """
@@ -38,9 +38,6 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import grid
-
 from brightwork_synth.patch import from_dict
 from brightwork_synth.render import (
     DRIVE_MAX,
@@ -48,10 +45,10 @@ from brightwork_synth.render import (
     HEADROOM_STEP_DB,
     SATURATION,
     K,
-    _drives,
     allowed,
     decimate,
     decimator,
+    drives_db,
     interpolator_for,
     rates,
     render,
@@ -67,6 +64,7 @@ from brightwork_synth.voice import (
     tables,
     voice,
 )
+from tools import grid
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB
@@ -113,7 +111,7 @@ def candidates(knees, d0: float, up: bool) -> list[float]:
     """The drives the report's search visits, in search order."""
     drops = knees.drops()
     sides = np.concatenate((drops * (1.0 - 1e-12), drops * (1.0 + 1e-12)))
-    jumps = [float(d) for d in _drives(sides)]
+    jumps = [float(d) for d in drives_db(sides)]
     if up:
         steps = list(np.arange(d0 + HEADROOM_STEP_DB, DRIVE_MAX, HEADROOM_STEP_DB)) + [DRIVE_MAX]
         return sorted({float(d) for d in steps + jumps if d0 < d <= DRIVE_MAX})

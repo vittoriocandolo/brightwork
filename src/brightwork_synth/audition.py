@@ -46,7 +46,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 
 import numpy as np
 
@@ -74,6 +74,14 @@ STEREO = 2  # channels
 EVEN_ODDS = 0.5  # a fair coin's: which of a blind pair plays first
 POLL_S = 0.1  # how often the session looks at its files and its pairs
 FAILURES = (ValueError, RuntimeError, OSError, ArithmeticError, MemoryError)  # what a render can fail with
+
+
+class Offer(NamedTuple):
+    """What waits for a slot's next hit: its generation, its take buffers, and the sample matched to them."""
+
+    generation: Generation
+    buffers: list[Audio]
+    sample: Audio | None
 
 
 class Writer(Protocol):
@@ -230,7 +238,7 @@ class Hits:
         self.chokes = {a: frozenset(bs) for a, bs in s.chokes.items()}
         self.fade, self.fade_length = fade(s.release_ms, rate)
         self.channels = max(s.channels, s.bed.channels if s.bed is not None else 1)
-        self._offers: list[tuple[Generation, list[Audio], Audio | None] | None] = [None] * s.slots
+        self._offers: list[Offer | None] = [None] * s.slots
         self._lock = threading.Lock()
         self.generations: list[Generation] = [(-1, 0)] * s.slots
         self.buffers: list[list[Audio]] = [[] for _ in range(s.slots)]  # empty until rendered
@@ -259,17 +267,22 @@ class Hits:
         key = generation if isinstance(generation, tuple) else (generation, 0)
         with self._lock:
             current = self._offers[slot]
-            if current is None or key > current[0]:
-                self._offers[slot] = (key, list(buffers), sample)
+            if current is None or key > current.generation:
+                self._offers[slot] = Offer(key, list(buffers), sample)
+
+    def offered(self, slot: int) -> Offer | None:
+        """Return what waits for a slot's next hit, if anything."""
+        with self._lock:
+            return self._offers[slot]
 
     def _take_offers(self) -> None:
         """Take every offer newer than what its slot plays."""
         with self._lock:
             for i, offered in enumerate(self._offers):
-                if offered is not None and offered[0] > self.generations[i]:
-                    self.generations[i], self.buffers[i] = offered[0], offered[1]
+                if offered is not None and offered.generation > self.generations[i]:
+                    self.generations[i], self.buffers[i] = offered.generation, offered.buffers
                     if i == 0:
-                        self.sample = offered[2]
+                        self.sample = offered.sample
 
     def _slot_for_step(self, n: int) -> int | None:
         """Return the slot that plays step n, or None for a rest or a patch not rendered yet."""
@@ -405,6 +418,11 @@ class Watcher:
                 return
             self._pending = (self.generation, text)
             self._cv.notify()
+
+    def pending(self) -> bool:
+        """Tell whether a request waits to be rendered."""
+        with self._cv:
+            return self._pending is not None
 
     def newest(self, generation: int) -> bool:
         """Tell whether a generation is still the newest, and the watcher still running."""

@@ -14,27 +14,28 @@ import math
 
 import numpy as np
 import pytest
-from conftest import edit as set_path
 
-from brightwork_synth import patch as P
+from brightwork_synth import patch
 from brightwork_synth.cli import reference_text
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.render import render
+
+from .conftest import edit as set_path
 
 RATE = 48000
 
 
 def ref(name):
-    return P.loads(reference_text(name))
+    return patch.loads(reference_text(name))
 
 
 def edit(p, **fields):
     """Field edits by patch path, such as edit(p, **{"noise[2].level_db": -3.0}); the caller counts them."""
     assert len(fields) <= 3
-    d = P.to_dict(p)
+    d = patch.to_dict(p)
     for path, value in fields.items():
         set_path(d, path, value)
-    return P.from_dict(d)
+    return patch.from_dict(d)
 
 
 def audio(p):
@@ -117,7 +118,7 @@ def peak_hz(x, near, start_ms=5.0, length_ms=400.0):
 # The references themselves (tools/references.py measures seeds 1–4 × takes 1–8; this checks the first take).
 
 
-def test_the_references_are_matched_inside_and_combine_into_kits():
+def test_the_references_are_matched_inside_and_combine_into_kits() -> None:
     from brightwork_synth.cli import REFERENCES
     from brightwork_synth.render import render_takes
 
@@ -134,14 +135,14 @@ def test_the_references_are_matched_inside_and_combine_into_kits():
 # From the closed hat.
 
 
-def test_tighten_and_loosen_the_closed_hat():
+def test_tighten_and_loosen_the_closed_hat() -> None:
     p = ref("closed")
     base = decay_ms(audio(p))
-    assert decay_ms(audio(P.stretch(p, "all", 0.6))) < 0.8 * base  # one command
-    assert decay_ms(audio(P.stretch(p, "all", 1.6))) > 1.25 * base  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 0.6))) < 0.8 * base  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 1.6))) > 1.25 * base  # one command
 
 
-def test_darken_and_brighten_the_closed_hat():
+def test_darken_and_brighten_the_closed_hat() -> None:
     p = ref("closed")
     base = centroid(audio(p))
     darker = edit(p, **{"noise[1].band_hz": [5000.0, 11000.0], "noise[2].band_hz": [3000.0, 11000.0]})
@@ -150,16 +151,16 @@ def test_darken_and_brighten_the_closed_hat():
     assert centroid(audio(brighter)) > 1.05 * base
 
 
-def test_add_stick_to_the_closed_hat():
+def test_add_stick_to_the_closed_hat() -> None:
     p = ref("closed")
     louder = edit(p, **{"noise[2].level_db": p.noise[1].level_db + 6})  # one field: the tick
     # The tick reaches lower than the plates, so it shows below 6 kHz in the first milliseconds.
     assert band_energy(audio(louder), 2000, 6000, 0, 2) > 1.25 * band_energy(audio(p), 2000, 6000, 0, 2)
 
 
-def test_make_a_ghost_note():
+def test_make_a_ghost_note() -> None:
     p = ref("closed")
-    ghost = P.softer(p, 18)  # one command
+    ghost = patch.softer(p, 18)  # one command
     x, g = audio(p), audio(ghost)
     assert loudness(g) == pytest.approx(loudness(x) - 18, abs=1.0)
     assert centroid(g) < centroid(x)  # the contact rule: a softer strike excites less high end
@@ -168,10 +169,10 @@ def test_make_a_ghost_note():
 # From the open hat.
 
 
-def test_shorten_and_half_open_the_open_hat():
+def test_shorten_and_half_open_the_open_hat() -> None:
     p = ref("open")
     x = audio(p)
-    assert decay_ms(audio(P.stretch(p, "all", 0.6))) < 0.8 * decay_ms(x)  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 0.6))) < 0.8 * decay_ms(x)  # one command
     # Two fields: the plates touch, so they slap more and damp each other over the whole ring.
     half = edit(p, **{"noise[1].chatter": 0.6, "damper.amp": [{"ms": 0.0, "gain": 1.0}, {"ms": 700.0, "gain": 0.0}]})
     h = audio(half)
@@ -179,16 +180,17 @@ def test_shorten_and_half_open_the_open_hat():
     assert modulation(h) > 1.2 * modulation(x)
 
 
-def test_close_the_open_hat_on_a_beat():
+def test_close_the_open_hat_on_a_beat() -> None:
     p = ref("open")
-    closed = P.choke(p, 250.0)  # one command: closed by the foot on the beat at 250 ms
+    closed = patch.choke(p, 250.0)  # one command: closed by the foot on the beat at 250 ms
     c = audio(closed)
     assert closed.length_ms == pytest.approx(250.0 + 40.0 * 7 / 6, abs=0.01)
-    assert c.size / RATE < 0.3 and decay_ms(c, 60) < 297  # silent within the release, the file ends with it
+    assert c.size / RATE < 0.3
+    assert decay_ms(c, 60) < 297
     assert decay_ms(c, 60) > 250  # and it rang until the beat
 
 
-def test_darken_the_open_hat():
+def test_darken_the_open_hat() -> None:
     p = ref("open")
     darker = edit(p, **{"noise[1].band_hz": [5000.0, 11000.0], "noise[2].band_hz": [3000.0, 11000.0]})
     assert centroid(audio(darker), 0, 200) < 0.9 * centroid(audio(p), 0, 200)
@@ -197,10 +199,10 @@ def test_darken_the_open_hat():
 # From the pedal.
 
 
-def test_shorten_and_darken_the_pedal():
+def test_shorten_and_darken_the_pedal() -> None:
     p = ref("pedal")
     x = audio(p)
-    assert decay_ms(audio(P.stretch(p, "all", 0.6))) < 0.8 * decay_ms(x)  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 0.6))) < 0.8 * decay_ms(x)  # one command
     darker = edit(p, **{"noise[1].band_hz": [2500.0, 8000.0], "noise[2].band_hz": [900.0, 4000.0]})
     assert centroid(audio(darker)) < 0.9 * centroid(x)
 
@@ -208,16 +210,16 @@ def test_shorten_and_darken_the_pedal():
 # From the crash.
 
 
-def test_lengthen_and_choke_the_crash():
+def test_lengthen_and_choke_the_crash() -> None:
     p = ref("crash")
     x = audio(p)
-    assert decay_ms(audio(P.stretch(p, "all", 1.5)), 50) > 1.25 * decay_ms(x, 50)  # one command
-    choked = P.choke(p, 450.0)  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 1.5)), 50) > 1.25 * decay_ms(x, 50)  # one command
+    choked = patch.choke(p, 450.0)  # one command
     assert choked.length_ms == pytest.approx(450.0 + 40.0 * 7 / 6, abs=0.01)
     assert decay_ms(audio(choked), 50) < 0.6 * decay_ms(x, 50)
 
 
-def test_darken_the_crash_tail():
+def test_darken_the_crash_tail() -> None:
     p = ref("crash")
     darker = edit(p, **{"noise[1].damping": 1.4})  # one field: the highs die sooner
     x, d = audio(p), audio(darker)
@@ -225,7 +227,7 @@ def test_darken_the_crash_tail():
     assert centroid(d, 0, 20) == pytest.approx(centroid(x, 0, 20), rel=0.1)  # the strike itself stays
 
 
-def test_make_the_crash_bloom_more():
+def test_make_the_crash_bloom_more() -> None:
     p = ref("crash")
     more = edit(p, **{"noise[1].bloom": 1.0})  # one field
 
@@ -235,7 +237,7 @@ def test_make_the_crash_bloom_more():
     assert build_up(audio(more)) > 1.5 * build_up(audio(p))
 
 
-def test_make_a_splash_and_a_china_from_the_crash():
+def test_make_a_splash_and_a_china_from_the_crash() -> None:
     p = ref("crash")
     x = audio(p)
     # Brighter and shorter (two fields): a higher band, and a damper that fades the whole ring by 1.2 s.
@@ -247,7 +249,8 @@ def test_make_a_splash_and_a_china_from_the_crash():
         },
     )
     s = audio(splash)
-    assert centroid(s, 0, 50) > 1.05 * centroid(x, 0, 50) and decay_ms(s, 50) < 0.8 * decay_ms(x, 50)
+    assert centroid(s, 0, 50) > 1.05 * centroid(x, 0, 50)
+    assert decay_ms(s, 50) < 0.8 * decay_ms(x, 50)
     # Darker, shorter and rougher (three fields): a lower band, the plates slapping at chatter_hz, 220 Hz, and a
     # damper over the ring. A darker band alone lengthens the measured decay, since what remains is the slow low end.
     damper = [{"ms": 150.0, "gain": 1.0}, {"ms": 1500.0, "gain": 0.0}]
@@ -261,7 +264,7 @@ def test_make_a_splash_and_a_china_from_the_crash():
 # From the ride.
 
 
-def test_add_ping_and_wash_to_the_ride():
+def test_add_ping_and_wash_to_the_ride() -> None:
     p = ref("ride")
     x = audio(p)
     ping = edit(p, **{"noise[2].level_db": p.noise[1].level_db + 6})  # one field: the stick's definition
@@ -270,7 +273,7 @@ def test_add_ping_and_wash_to_the_ride():
     assert band_energy(audio(wash), 500, 16000, 1000, 1000) > 2 * band_energy(x, 500, 16000, 1000, 1000)
 
 
-def test_darken_the_ride():
+def test_darken_the_ride() -> None:
     p = ref("ride")
     darker = edit(
         p,
@@ -286,34 +289,35 @@ def test_darken_the_ride():
 # From the bell.
 
 
-def test_retune_and_shorten_the_bell():
+def test_retune_and_shorten_the_bell() -> None:
     p = ref("bell")
     x = audio(p)
     lowest = p.tone[0].partials[0][0]
     assert peak_hz(x, lowest) == pytest.approx(lowest, abs=0.5)
-    d5 = P.pitch(p, "D5")  # one command
+    d5 = patch.pitch(p, "D5")  # one command
     assert peak_hz(audio(d5), 587.33) == pytest.approx(587.33, abs=0.5)
-    assert decay_ms(audio(P.stretch(p, "all", 0.6)), 50) < 0.8 * decay_ms(x, 50)  # one command
+    assert decay_ms(audio(patch.stretch(p, "all", 0.6)), 50) < 0.8 * decay_ms(x, 50)  # one command
 
 
 # From the analog hat.
 
 
-def test_open_the_analog_hat_and_turn_it_into_its_cymbal():
+def test_open_the_analog_hat_and_turn_it_into_its_cymbal() -> None:
     p = ref("analog")
     x = audio(p)
-    opened = P.stretch(p, "all", 8.0)  # one command
+    opened = patch.stretch(p, "all", 8.0)  # one command
     assert decay_ms(audio(opened)) > 4 * decay_ms(x)
     # Its cymbal: the same oscillators through a lower band, ringing for a second (three fields).
     cymbal = edit(p, **{"tone[1].band_hz": [3500.0, 18000.0], "tone[1].amp[4].ms": 300.0, "tone[1].amp[5].ms": 1200.0})
     c = audio(cymbal)
-    assert decay_ms(c) > 8 * decay_ms(x) and centroid(c) < 0.9 * centroid(x)
+    assert decay_ms(c) > 8 * decay_ms(x)
+    assert centroid(c) < 0.9 * centroid(x)
 
 
-def test_retune_and_darken_the_analog_hat():
+def test_retune_and_darken_the_analog_hat() -> None:
     p = ref("analog")
     x = audio(p)
-    up = P.pitch(p, "+3")  # one command
+    up = patch.pitch(p, "+3")  # one command
     assert log_shift_semitones(x, audio(up)) == pytest.approx(3.0, abs=0.2)
     darker = edit(p, **{"tone[1].band_hz": [6000.0, 11000.0]})  # one field
     assert centroid(audio(darker)) < 0.9 * centroid(x)

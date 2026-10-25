@@ -12,7 +12,7 @@ the loudness spread of takes 1–8 of each seed. The acceptance criteria are:
   * a loudness spread of at most 1 dB over takes 1–8 of each seed, or else a set that the report flags as
     uneven and that level matching brings within 1 dB.
 
-    python tools/references.py [--seeds 4] [--takes 8] [--workers N]
+    uv run python -m tools.references [--seeds 4] [--takes 8] [--workers N]
 """
 
 from __future__ import annotations
@@ -23,9 +23,6 @@ import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.loudness import momentary_max

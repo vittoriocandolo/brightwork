@@ -613,7 +613,7 @@ def _damper_kinks(v: Voice, damper: Curve, st: State, where: dict[float, int]) -
     return _rows(where, names, damper.t, j2 * whole[idx], j3 * whole[idx] + 3 * j2 * dwhole[idx])
 
 
-def _weights(rate: int, band: float) -> tuple[float, float]:
+def kink_weights(rate: int, band: float) -> tuple[float, float]:
     """Return the kink bound's weights of a jump in x″ and in x‴ at rate F, for the band the decimator passes."""
     return (
         INTERPOLATION_MARGIN * 4 * ZETA3 * band / (TWO_PI * rate) ** 3,
@@ -630,7 +630,7 @@ def kink_contributions(k: Kinks, alpha: float, rate: int, band: float) -> Floats
     4 ζ(n+1) · band · |J| / (2πF)^(n+1). Through the saturator y″ jumps by
     S′·Δx″ and y‴ by S′·Δx‴ + 3·S″·x′·Δx″.
     """
-    w2, w3 = _weights(rate, band)
+    w2, w3 = kink_weights(rate, band)
     g1, g2 = slope(alpha, k.x), curvature(alpha, k.x)
     out: Floats = w2 * np.abs(g1 * k.d2) + w3 * np.abs(g1 * k.d3 + 3 * g2 * k.dx * k.d2)
     return out
@@ -643,7 +643,7 @@ def kink_bound(k: Kinks, alpha: float, rate: int, band: float) -> float:
 
 def kink_bounds(k: Kinks, alphas: ArrayLike, rate: int, band: float) -> Floats:
     """Return the kink bound at many drives at once."""
-    w2, w3 = _weights(rate, band)
+    w2, w3 = kink_weights(rate, band)
     a = np.asarray(alphas, dtype=float)[:, None]
     driven = a > 0
     th = np.tanh(a * k.x)

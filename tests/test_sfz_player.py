@@ -28,8 +28,7 @@ import numpy as np
 import pytest
 import soundfile
 
-from brightwork_synth import cli
-from brightwork_synth import pack as K
+from brightwork_synth import cli, pack
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import loads, softer
 
@@ -141,8 +140,8 @@ def played(request, tmp_path_factory):
     # each note can be told by correlation even through a player's interpolation.
     soft = dataclasses.replace(softer(closed, 12), take=11)
     groups = [(42, [("closed", closed), ("closed-12", soft)]), (46, [("open", loud("open"))])]
-    kit = K.build(groups, K.Options(takes=2, chokes=((46, (42,)),)), stem="kit")
-    K.write(kit, out / "kit")
+    kit = pack.build(groups, pack.Options(takes=2, chokes=((46, (42,)),)), stem="kit")
+    pack.write(kit, out / "kit")
     notes = [
         (0.5, 42, 127, 0.05),
         (1.0, 42, 127, 0.05),
@@ -158,12 +157,13 @@ def played(request, tmp_path_factory):
     # player's pan law (exactly 1 in sfizz, 1.0125 in liquidsfz).
     left, right = y[:, 0], y[:, 1]
     c = float(np.dot(left, right) / np.dot(left, left))
-    assert abs(20 * math.log10(c)) < 0.2 and np.max(np.abs(right - c * left)) <= 1e-6 * np.max(np.abs(right))
+    assert abs(20 * math.log10(c)) < 0.2
+    assert np.max(np.abs(right - c * left)) <= 1e-6 * np.max(np.abs(right))
     files = {p.name: soundfile.read(p, dtype="float64")[0] for p in (out / "kit").glob("*.wav")}
     return kit, notes, y[:, 0], files
 
 
-def test_each_note_plays_its_key_layer_and_round_robin(played):
+def test_each_note_plays_its_key_layer_and_round_robin(played) -> None:
     kit, notes, y, files = played
     (loud, soft), (open_hat,) = kit.keys[0].layers, kit.keys[1].layers
     heard = []
@@ -172,7 +172,9 @@ def test_each_note_plays_its_key_layer_and_round_robin(played):
             name, corr, _ = identify(y, round(t * RATE), files)
             assert corr > 0.99, (t, name, corr)  # any other file, an independent strike, correlates near 0
             heard.append(name)
-    assert soft.lovel == 1 and soft.hivel < 127 and loud.lovel == soft.hivel + 1
+    assert soft.lovel == 1
+    assert soft.hivel < 127
+    assert loud.lovel == soft.hivel + 1
     # Velocity 127 plays the loudest layer and 40 the softer one, on the key played.
     rr = loud.files(42)
     assert heard[:3] == [rr[0], rr[1], rr[0]]
@@ -182,7 +184,7 @@ def test_each_note_plays_its_key_layer_and_round_robin(played):
     assert heard[5:] == open_hat.files(46)
 
 
-def test_velocity_follows_the_square_law_across_layers(played):
+def test_velocity_follows_the_square_law_across_layers(played) -> None:
     # The player scales each file by its group's volume and curve point. Each layer's curve is set from its first
     # take's loudness, so a first take sounds at exactly 40·log10(v/127) dB from the loudest layer's first take at
     # 127, and every take of a layer gets the same gain at the same velocity.
@@ -200,7 +202,7 @@ def test_velocity_follows_the_square_law_across_layers(played):
     assert gain2 == pytest.approx(gain1, abs=0.05)
 
 
-def test_the_closed_hat_chokes_the_open_one_over_the_release(played):
+def test_the_closed_hat_chokes_the_open_one_over_the_release(played) -> None:
     kit, notes, y, files = played
     x = files[kit.keys[1].layers[0].files(46)[0]]
     _, _, at = identify(y, round(3.0 * RATE), files)

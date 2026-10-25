@@ -8,9 +8,9 @@ at 128 × base (6.144 MHz for the 48 kHz family), whose convergence is checked
 against 256 × base, and against 512 × base on every tenth fixture. The results
 fix the internal rate and the constant of the validated-domain rule.
 
-    python tools/grid.py run --k 32 [--family NAME ...] [--out docs/grid/k32.csv]
-    python tools/grid.py analyze docs/grid/k16.csv docs/grid/k32.csv
-    python tools/grid.py list [--family NAME] [--verbose]
+    uv run python -m tools.grid run --k 32 [--family NAME ...] [--out docs/grid/k32.csv]
+    uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
+    uv run python -m tools.grid list [--family NAME] [--verbose]
 
 A run appends to its CSV and skips fixtures already there, so it can resume.
 """
@@ -28,26 +28,51 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from brightwork_synth import cli, patch
+from brightwork_synth.reference import CHECK, DEEP, REFERENCE, compare, reference
+from brightwork_synth.render import LIMIT, QUIET, SATURATION, synthesize
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+type Knots = list[dict[str, float]]  # a curve as TOML parses it
+type Source = dict[str, Any]  # a [[noise]] or [[tone]] table
+type Edits = dict[str, Any]  # fields set by patch path
+type Fixture = tuple[str, str, Edits]  # family, name, edits
+type Row = dict[str, Any]  # one fixture's results
+type Add = Callable[..., None]  # add(family, name, **edits)
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from brightwork_synth import cli  # noqa: E402
-from brightwork_synth import patch as P  # noqa: E402
-from brightwork_synth.reference import CHECK, DEEP, REFERENCE, compare, reference  # noqa: E402
-from brightwork_synth.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
-
 INF = math.inf
 FLOOR = 1e-7
+LIMIT_DB = -100.0  # the rendering accuracy every fixture inside the domain meets
+CONVERGED_DB = -120.0  # how far below that a reference must agree with its check
+DEEP_FLOOR_DB = -200.0  # below which two references agree to rounding
+ROUNDING = 1e-15  # of the peak: an error the kink bound need not cover
+RANDOM_FIXTURES = 220
+REPORT_EVERY = 25  # fixtures between progress lines
+DEEP_EVERY = 10  # every tenth fixture is also checked at 512 × base
+TOP_HZ = 20000.0
+DAMPED = 0.2  # the share of random fixtures that a damper chokes
 
 
-def amp(*pts):
+def say(text: str) -> None:
+    """Print a line of progress at once."""
+    sys.stdout.write(f"{text}\n")
+    sys.stdout.flush()
+
+
+def amp(*pts: tuple[float, float]) -> Knots:
+    """Write knots as TOML parses them."""
     return [{"ms": float(m), "gain": float(g)} for m, g in pts]
 
 
-def partials(*pairs):
+def partials(*pairs: tuple[float, float]) -> Knots:
+    """Write partials as TOML parses them."""
     return [{"hz": float(f), "level_db": float(v)} for f, v in pairs]
 
 
@@ -58,35 +83,59 @@ OPEN = amp((0, 0), (0.6, 1), (60, 0.5), (250, 0.16), (520, 0.05), (850, 0.016), 
 RING = amp((0, 0), (2, 1), (180, 0.55), (700, 0.2), (1500, 0.06), (2500, 0.018), (3500, 0.005), (4500, 0))
 LONG = amp((0, 0), (2, 1), (300, 0.5), (1500, 0.15), (4000, 0.03), (6500, 0.006), (8000, 0))
 ANALOG = (205.3, 304.4, 369.6, 522.7, 540.0, 800.0)
+STRUCK = amp((0, 0), (0.02, 1), (0.12, 0.7), (20, 0.12), (60, 0))  # a tone's shape unless one is given
 
 
-def noise(level, band, spacing=14.0, shape=PLATES, damping=0.5, bloom=0.0, chatter=0.0, chatter_hz=220.0):
-    return {
+def noise(level: float, band: Sequence[float], spacing: float = 14.0, shape: Knots = PLATES, **fields: float) -> Source:
+    """Write a noise source; `fields` sets damping (0.5 unless set), bloom, chatter and chatter_hz (220 Hz)."""
+    source: Source = {
         "level_db": float(level),
         "band_hz": [float(band[0]), float(band[1])],
         "spacing_hz": float(spacing),
-        "damping": float(damping),
-        "bloom": float(bloom),
-        "chatter": float(chatter),
-        "chatter_hz": float(chatter_hz),
-        "amp": copy.deepcopy(shape),
-    }
-
-
-def tone(level, hz, band, wave="square", phase="free", shape=None, damping=0.3, bloom=0.0, levels=None):
-    levels = levels or [0.0] * len(hz)
-    return {
-        "level_db": float(level),
-        "wave": wave,
-        "phase": phase,
-        "partials": partials(*zip(hz, levels)),
-        "band_hz": [float(band[0]), float(band[1])],
-        "damping": float(damping),
-        "bloom": float(bloom),
+        "damping": 0.5,
+        "bloom": 0.0,
         "chatter": 0.0,
         "chatter_hz": 220.0,
-        "amp": copy.deepcopy(shape or amp((0, 0), (0.02, 1), (0.12, 0.7), (20, 0.12), (60, 0))),
+        "amp": copy.deepcopy(shape),
     }
+    for key, value in fields.items():
+        if key not in ("damping", "bloom", "chatter", "chatter_hz"):
+            msg = f"a noise source has no field {key!r} to set"
+            raise TypeError(msg)
+        source[key] = float(value)
+    return source
+
+
+def tone(
+    level: float,
+    hz: Sequence[float],
+    band: Sequence[float],
+    shape: Knots | None = None,
+    levels: Sequence[float] | None = None,
+    **fields: object,
+) -> Source:
+    """Write a tone; `fields` sets wave ("square" unless set), phase ("free"), damping (0.3) and bloom."""
+    source: Source = {
+        "level_db": float(level),
+        "wave": "square",
+        "phase": "free",
+        "partials": partials(*zip(hz, levels or [0.0] * len(hz), strict=True)),
+        "band_hz": [float(band[0]), float(band[1])],
+        "damping": 0.3,
+        "bloom": 0.0,
+        "chatter": 0.0,
+        "chatter_hz": 220.0,
+        "amp": copy.deepcopy(shape or STRUCK),
+    }
+    for key, value in fields.items():
+        if key in ("wave", "phase"):
+            source[key] = str(value)
+        elif key in ("damping", "bloom") and isinstance(value, (int, float)):
+            source[key] = float(value)
+        else:
+            msg = f"a tone has no field {key!r} to set to {value!r}"
+            raise TypeError(msg)
+    return source
 
 
 # The plan's closed hat at unity output gain.
@@ -95,7 +144,7 @@ BASE = {
     "schema": 1,
     "seed": 1,
     "take": 1,
-    "noise": [noise(-2, (6000, 16000)), noise(-10, (3000, 18000), 0.0, TICK, 0.0)],
+    "noise": [noise(-2, (6000, 16000)), noise(-10, (3000, 18000), 0.0, TICK, damping=0.0)],
     "damper": {"amp": []},
     "drive": {"db": 0.0},
     "output": {"sample_rate": 48000, "format": "float32", "mode": "gain", "db": 0.0, "polarity": 1},
@@ -111,12 +160,15 @@ BANDS = {
 }
 
 
-def set_path(d: dict, path: str, value) -> None:
-    """Set a field by its patch path, counting from 1: set_path(d, "noise[2].amp", [...])."""
-    node = d
+def set_path(d: dict[str, Any], path: str, value: object) -> None:
+    """Set a field of parsed TOML by its patch path, counting from 1, such as "noise[2].amp"."""
+    node: Any = d
     parts = path.split(".")
     for i, part in enumerate(parts):
         m = re.fullmatch(r"(\w+)(?:\[(\d+)\])?", part)
+        if m is None:
+            msg = f"{path}: not a patch path"
+            raise ValueError(msg)
         name, index = m.group(1), m.group(2)
         last = i == len(parts) - 1
         if index is None:
@@ -130,30 +182,42 @@ def set_path(d: dict, path: str, value) -> None:
             node = node[name][int(index) - 1]
 
 
-def patch_dict(edits: dict) -> dict:
+def patch_dict(edits: Edits) -> dict[str, Any]:
+    """Return the base patch with the edits applied, as TOML parses it."""
     d = copy.deepcopy(BASE)
     for path, value in edits.items():
         set_path(d, path, copy.deepcopy(value))
     return d
 
 
-def valid(edits: dict) -> bool:
+def valid(edits: Edits) -> bool:
+    """Tell whether the edits make a valid patch."""
     try:
-        P.from_dict(patch_dict(edits))
-        return True
-    except P.PatchError:
+        patch.from_dict(patch_dict(edits))
+    except patch.PatchError:
         return False
+    return True
 
 
-def fixtures():
-    """(family, name, edits): combined corners and a random sample of the valid domain."""
-    out = []
+def fixtures() -> list[Fixture]:
+    """Return every fixture, (family, name, edits): combined corners and a random sample of the valid domain."""
+    out: list[Fixture] = []
 
-    def add(family, name, **edits):
+    def add(family: str, name: str, **edits: object) -> None:
         if valid(edits):
             out.append((family, name, edits))
 
-    # Noise: bands × spacing × (level, drive), one source with the closed hat's plates.
+    for family in (_noise, _damping, _chatter, _ticks, _tones, _chokes, _layers, _dynamics):
+        family(add)
+    _seeds(add, out)
+    _rates(add)
+    _random(out)
+    _longest(add)
+    return out
+
+
+def _noise(add: Add) -> None:
+    """Add bands × spacing × (level, drive), one source with the closed hat's plates."""
     pairs = ((0, 0), (0, 12), (0, 18), (0, 24), (0, 36), (0, 48), (12, 0), (12, 12), (24, 0), (24, 24))
     for bname, band in BANDS.items():
         for spacing in (0, 1, 16, 200):
@@ -164,8 +228,13 @@ def fixtures():
                     noise=[noise(level, band, spacing)],
                     **{"drive.db": float(drive)},
                 )
-    # Damping and bloom: 0–3 each from 20 Hz, 300 Hz and 6 kHz, short and long shapes; the rest is rejected
-    # by the valid domain's limit on compression at 20 kHz.
+
+
+def _damping(add: Add) -> None:
+    """Add damping and bloom 0–3 each, from 20 Hz, 300 Hz and 6 kHz, on short and long shapes.
+
+    The valid domain's limit on compression at 20 kHz rejects the rest.
+    """
     for f_ref in (20, 300, 6000):
         for damping in (0, 1, 1.6, 2, 3):
             for bloom in (0, 1, 1.6, 3):
@@ -174,10 +243,13 @@ def fixtures():
                         add(
                             "damping",
                             f"f{f_ref}-c{damping:g}-b{bloom:g}-{sname}-d{drive}",
-                            noise=[noise(0, (f_ref, 20000), spacing, shape, damping, bloom)],
+                            noise=[noise(0, (f_ref, 20000), spacing, shape, damping=damping, bloom=bloom)],
                             **{"drive.db": float(drive)},
                         )
-    # Chatter: depth × rate × drive over the hat's plates.
+
+
+def _chatter(add: Add) -> None:
+    """Add chatter's depth × rate × drive over the hat's plates."""
     for depth in (0.25, 0.5, 1.0):
         for rate in (10, 220, 1000, 4000):
             for drive in (0, 12, 24):
@@ -187,7 +259,10 @@ def fixtures():
                     **{"noise[1].level_db": 0.0, "noise[1].chatter": depth, "noise[1].chatter_hz": float(rate)},
                     **{"noise[2].level_db": -INF, "drive.db": float(drive)},
                 )
-    # Ticks: 10–50 µs rises under full-scale bright noise and dense modes.
+
+
+def _ticks(add: Add) -> None:
+    """Add 10–50 µs rises under full-scale bright noise and dense modes."""
     for h in (0.01, 0.02, 0.05):
         for bname, band in (("bright", (1000, 20000)), ("hat", (6000, 16000)), ("hat2", (8000, 18000))):
             for spacing in (0, 1):
@@ -197,11 +272,13 @@ def fixtures():
                         add(
                             "ticks",
                             f"h{h * 1000:g}us-{bname}-s{spacing}-L{level}-d{drive}",
-                            noise=[noise(level, band, spacing, shape, 0.0)],
+                            noise=[noise(level, band, spacing, shape, damping=0.0)],
                             **{"drive.db": float(drive)},
                         )
-    # Tones: square banks at the analog frequencies and eight times higher, through bands, under drive;
-    # struck sine partials up to 20 kHz with fast rises.
+
+
+def _tones(add: Add) -> None:
+    """Add square banks at the analog frequencies and eight times higher, and struck sines up to 20 kHz."""
     for octave in (1, 8):
         hz = [f * octave for f in ANALOG]
         for bname, band in (("analog", (7000, 16000)), ("wide", (300, 20000)), ("mid", (2000, 9000))):
@@ -216,33 +293,41 @@ def fixtures():
     for rise in (0.01, 0.02, 0.05):
         for drive in (0, 12, 24):
             shape = amp((0, 0), (rise, 1), (rise + 0.1, 0.6), (8, 0.1), (40, 0))
-            add(
-                "tones",
-                f"sine-r{rise * 1000:g}us-d{drive}",
-                noise=[],
-                tone=[
-                    tone(0, (5000, 11000, 19500), (20, 20000), "sine", "strike", shape, 1.0, levels=(0, -3, -6)),
-                ],
-                **{"drive.db": float(drive)},
+            sines = tone(
+                0,
+                (5000, 11000, 19500),
+                (20, 20000),
+                shape,
+                (0, -3, -6),
+                wave="sine",
+                phase="strike",
+                damping=1.0,
             )
-    # Chokes: dampers from `choke`, with releases of 1–100 ms, over ringing sources.
-    ringing = P.from_dict(patch_dict({"noise": [noise(0, (400, 18000), 18.0, RING, 0.9, 0.4)]}))
+            add("tones", f"sine-r{rise * 1000:g}us-d{drive}", noise=[], tone=[sines], **{"drive.db": float(drive)})
+
+
+def _chokes(add: Add) -> None:
+    """Add dampers from `choke`, with releases of 1–100 ms, over ringing sources."""
+    ringing = patch.from_dict(patch_dict({"noise": [noise(0, (400, 18000), 18.0, RING, damping=0.9, bloom=0.4)]}))
     for at in (50, 300):
         for release in (1, 5, 20, 100):
-            choked = P.choke(ringing, float(at), float(release))
+            choked = patch.choke(ringing, float(at), float(release))
             for drive in (0, 24):
                 add(
                     "chokes",
                     f"at{at}-r{release}-d{drive}",
-                    noise=P.to_dict(choked)["noise"],
-                    **{"damper.amp": P.to_dict(choked)["damper"]["amp"], "drive.db": float(drive)},
+                    noise=patch.to_dict(choked)["noise"],
+                    **{"damper.amp": patch.to_dict(choked)["damper"]["amp"], "drive.db": float(drive)},
                 )
-    # Layers: four coherent sources at +24 dB, and crossfades between spacings and bands.
+
+
+def _layers(add: Add) -> None:
+    """Add four coherent sources at +24 dB, and crossfades between spacings and bands."""
     four = [
         noise(24, (6000, 16000), 14.0),
-        noise(24, (3000, 18000), 0.0, TICK, 0.0),
-        noise(24, (2000, 9000), 16.0, OPEN, 1.0),
-        noise(24, (500, 5000), 200.0, PLATES, 0.0),
+        noise(24, (3000, 18000), 0.0, TICK, damping=0.0),
+        noise(24, (2000, 9000), 16.0, OPEN, damping=1.0),
+        noise(24, (500, 5000), 200.0, PLATES, damping=0.0),
     ]
     for drive in (0, 12, 24, 36, 48):
         add("layers", f"four-L24-d{drive}", noise=four, **{"drive.db": float(drive)})
@@ -250,24 +335,29 @@ def fixtures():
     fade_in = amp((0, 0), (20, 0.1), (80, 1), (240, 0))
     for level in (0, 12):
         for drive in (0, 12, 24, 36):
-            add(
-                "layers",
-                f"crossfade-L{level}-d{drive}",
-                noise=[noise(level, (3000, 12000), 0.0, fade_out, 0.0), noise(level, (1000, 16000), 16.0, fade_in)],
-                **{"drive.db": float(drive)},
-            )
-    # Dynamics: softer ladders from every reference, at unity output gain.
+            crossfade = [
+                noise(level, (3000, 12000), 0.0, fade_out, damping=0.0),
+                noise(level, (1000, 16000), 16.0, fade_in),
+            ]
+            add("layers", f"crossfade-L{level}-d{drive}", noise=crossfade, **{"drive.db": float(drive)})
+
+
+def _dynamics(add: Add) -> None:
+    """Add `softer` ladders from every reference, at unity output gain."""
     for name in cli.REFERENCES:
-        ref = P.loads(cli.reference_text(name))
+        ref = patch.loads(cli.reference_text(name))
         for db in (0, 6, 12, 18, 24, 30, 36):
             try:
-                d = P.to_dict(P.softer(ref, db))
-            except P.PatchError:
+                d = patch.to_dict(patch.softer(ref, db))
+            except patch.PatchError:
                 continue  # `softer` refuses rather than clamps; the references are voiced to take the ladder
             d["output"]["db"] = 0.0
             fields = {k: d[k] for k in ("seed", "take", "damper", "drive", "output")}
             add("dynamics", f"{name}-softer{db}", noise=d.get("noise", []), tone=d.get("tone", []), **fields)
-    # Seeds and takes: one fixture per family across seeds 1–4 × takes 1–4.
+
+
+def _seeds(add: Add, out: list[Fixture]) -> None:
+    """Add one fixture of each family across seeds 1–4 × takes 1–4."""
     picks = [
         ("noise", "hat-s16-L0-d18"),
         ("damping", "f300-c1-b1-short-d24"),
@@ -282,7 +372,10 @@ def fixtures():
             for take in range(1, 5):
                 if (seed, take) != (1, 1):
                     add("seeds", f"{fam}-{name}-s{seed}-t{take}", **named[(fam, name)], seed=seed, take=take)
-    # Export rates share their family's internal rate.
+
+
+def _rates(add: Add) -> None:
+    """Add the export rates that share their family's internal rate."""
     for rate in (44100, 88200, 96000):
         for drive in (0, 24, 36):
             add("rates", f"sr{rate}-d{drive}", **{"output.sample_rate": rate, "drive.db": float(drive)})
@@ -291,34 +384,47 @@ def fixtures():
                 f"sr{rate}-hot-d{drive}",
                 **{"output.sample_rate": rate, "drive.db": float(drive), "noise[1].level_db": 6.0},
             )
-    # A random sample of the whole valid domain.
+
+
+def _random(out: list[Fixture]) -> None:
+    """Add a seeded random sample of the whole valid domain, every fixture sounding."""
     rng = np.random.default_rng(2026)
     made = 0
-    while made < 220:
+    while made < RANDOM_FIXTURES:
         e = random_edits(rng)
         if valid(e):
             out.append(("random", f"r{made:03d}", e))
             made += 1
-    # The longest sounds: 8 s rides and crashes with three sources, at 96 kHz.
+
+
+def _longest(add: Add) -> None:
+    """Add the longest sounds: 8 s rides and crashes with three sources, at 96 kHz."""
     long_sources = {
         "ride": [
-            noise(-6, (500, 16000), 15.0, LONG, 0.8, 0.15),
-            noise(-4, (3000, 9000), 40.0, amp((0, 0), (0.1, 1), (0.25, 0.7), (25, 0.15), (80, 0)), 1.0),
-            noise(-14, (2000, 18000), 0.0, TICK, 0.0),
+            noise(-6, (500, 16000), 15.0, LONG, damping=0.8, bloom=0.15),
+            noise(-4, (3000, 9000), 40.0, amp((0, 0), (0.1, 1), (0.25, 0.7), (25, 0.15), (80, 0)), damping=1.0),
+            noise(-14, (2000, 18000), 0.0, TICK, damping=0.0),
         ],
         "crash": [
-            noise(-1, (400, 18000), 18.0, LONG, 0.9, 0.4),
-            noise(-10, (2000, 18000), 0.0, amp((0, 0), (0.05, 1), (0.15, 0.6), (3, 0.1), (10, 0)), 0.0),
-            noise(-12, (300, 6000), 0.0, amp((0, 0), (5, 1), (400, 0.3), (2000, 0.05), (8000, 0)), 0.3, 1.0),
+            noise(-1, (400, 18000), 18.0, LONG, damping=0.9, bloom=0.4),
+            noise(-10, (2000, 18000), 0.0, amp((0, 0), (0.05, 1), (0.15, 0.6), (3, 0.1), (10, 0)), damping=0.0),
+            noise(
+                -12,
+                (300, 6000),
+                0.0,
+                amp((0, 0), (5, 1), (400, 0.3), (2000, 0.05), (8000, 0)),
+                damping=0.3,
+                bloom=1.0,
+            ),
         ],
     }
     for name, srcs in long_sources.items():
         for drive in (0, 12, 24):
             add("longest", f"{name}-8s-96k-d{drive}", noise=srcs, **{"output.sample_rate": 96000, "drive.db": drive})
-    return out
 
 
-def random_shape(rng, span: float) -> list:
+def random_shape(rng: np.random.Generator, span: float) -> Knots:
+    """Draw an amplitude shape: a rise of 10 µs to 3 ms, then one to four falling knots over about `span` ms."""
     rise = float(10 ** rng.uniform(-2, 0.5))
     knots = [(0.0, 0.0), (rise, 1.0)]
     t, g = rise, 1.0
@@ -330,63 +436,65 @@ def random_shape(rng, span: float) -> list:
     return amp(*knots)
 
 
-def random_edits(rng) -> dict:
-    """One draw over the valid domain; shapes span up to about 2.5 s, which the longest family exceeds."""
+def _band(rng: np.random.Generator) -> tuple[float, float]:
+    """Draw a band, log-uniformly placed, up to 2.5 decades wide."""
+    lo = float(10 ** rng.uniform(math.log10(20), math.log10(19000)))
+    return lo, float(min(20000.0, lo * 10 ** rng.uniform(0.001, 2.5)))
 
-    def band():
-        lo = float(10 ** rng.uniform(math.log10(20), math.log10(19000)))
-        return lo, float(min(20000.0, lo * 10 ** rng.uniform(0.001, 2.5)))
 
-    def bends(lo):
-        top = math.log(1000) / math.log(20000 / lo) if lo < 20000 else 3.0
-        damping = float(rng.choice([0.0, rng.uniform(0, min(3.0, top))]))
-        bloom = float(rng.choice([0.0, 0.0, rng.uniform(0, min(3.0, top))]))
-        return damping, bloom
+def _bends(rng: np.random.Generator, lo: float) -> tuple[float, float]:
+    """Draw damping and bloom within what the valid domain allows from `lo`."""
+    top = math.log(1000) / math.log(TOP_HZ / lo) if lo < TOP_HZ else 3.0
+    damping = float(rng.choice([0.0, rng.uniform(0, min(3.0, top))]))
+    bloom = float(rng.choice([0.0, 0.0, rng.uniform(0, min(3.0, top))]))
+    return damping, bloom
 
-    def level():
-        return float(rng.choice([-INF, rng.uniform(-40, 24)], p=[0.15, 0.85]))
 
+def _level(rng: np.random.Generator) -> float:
+    """Draw a source level: silent one time in seven or so, else −40 to +24 dB."""
+    return float(rng.choice([-INF, rng.uniform(-40, 24)], p=[0.15, 0.85]))
+
+
+def _random_tone(rng: np.random.Generator) -> Source:
+    """Draw a tone of one to six partials, its loudest at 0 dB."""
+    count = int(rng.integers(1, 7))
+    f0 = float(10 ** rng.uniform(math.log10(20), math.log10(4000)))
+    ratios = np.concatenate(([1.0], rng.uniform(1.01, 5.0, count - 1)))
+    hz = [f for f in sorted({round(f0 * float(r), 3) for r in ratios}) if f <= TOP_HZ]
+    levels = [float(x) for x in rng.uniform(-40, 0, len(hz))]
+    levels[int(rng.integers(len(hz)))] = 0.0
+    lo, hi = _band(rng)
+    damping, bloom = _bends(rng, max(lo, hz[0]))
+    span = float(10 ** rng.uniform(0.7, 3.4))
+    level = _level(rng)
+    wave, phase = str(rng.choice(["sine", "square"])), str(rng.choice(["strike", "free"]))
+    shape = random_shape(rng, span)
+    return tone(level, hz, (lo, hi), shape, levels, wave=wave, phase=phase, damping=damping, bloom=bloom)
+
+
+def random_edits(rng: np.random.Generator) -> Edits:
+    """Draw one fixture over the valid domain; shapes span up to about 2.5 s, which the longest family exceeds."""
     sources = []
     for _ in range(int(rng.integers(0, 5))):
-        lo, hi = band()
-        damping, bloom = bends(lo)
+        lo, hi = _band(rng)
+        damping, bloom = _bends(rng, lo)
         spacing = float(rng.choice([0.0, rng.uniform(1, 200)]))
         chatter = float(rng.choice([0.0, rng.uniform(0, 1)], p=[0.7, 0.3]))
         span = float(10 ** rng.uniform(0.7, 3.4))
+        level = _level(rng)
+        shape = random_shape(rng, span)
+        rate = float(rng.uniform(10, 4000))
         sources.append(
-            noise(level(), (lo, hi), spacing, random_shape(rng, span), damping, bloom, chatter, rng.uniform(10, 4000)),
+            noise(level, (lo, hi), spacing, shape, damping=damping, bloom=bloom, chatter=chatter, chatter_hz=rate),
         )
-    tones = []
-    for _ in range(int(rng.choice([0, 0, 1, 2]))):
-        count = int(rng.integers(1, 7))
-        f0 = float(10 ** rng.uniform(math.log10(20), math.log10(4000)))
-        hz = sorted({round(f0 * float(r), 3) for r in np.concatenate(([1.0], rng.uniform(1.01, 5.0, count - 1)))})
-        hz = [f for f in hz if f <= 20000]
-        levels = [float(x) for x in rng.uniform(-40, 0, len(hz))]
-        levels[int(rng.integers(len(hz)))] = 0.0
-        lo, hi = band()
-        damping, bloom = bends(max(lo, hz[0]))
-        span = float(10 ** rng.uniform(0.7, 3.4))
-        tones.append(
-            tone(
-                level(),
-                hz,
-                (lo, hi),
-                str(rng.choice(["sine", "square"])),
-                str(rng.choice(["strike", "free"])),
-                random_shape(rng, span),
-                damping,
-                bloom,
-                levels,
-            ),
-        )
+    tones = [_random_tone(rng) for _ in range(int(rng.choice([0, 0, 1, 2])))]
     if not sources and not tones:
-        sources.append(noise(0.0, band(), 14.0, PLATES))
-    every = [s for s in sources + tones]
+        sources.append(noise(0.0, _band(rng), 14.0, PLATES))
+    every = sources + tones
     if all(s["level_db"] == -INF for s in every):
         every[0]["level_db"] = 0.0  # a silent fixture would test nothing
     damper = []
-    if rng.uniform() < 0.2:
+    if rng.uniform() < DAMPED:
         start = float(rng.uniform(1, 400))
         fall = float(10 ** rng.uniform(-1.5, 2))
         damper = amp((start, 1), (start + fall / 2, 0.1), (start + fall, 0))
@@ -428,16 +536,17 @@ FIELDS = [
 ]
 
 
-def run_one(args) -> dict:
-    family, name, edits, k, deep = args
-    p = P.from_dict(patch_dict(edits))
+def run_one(job: tuple[str, str, Edits, int, bool]) -> Row:
+    """Render one fixture by the shipping path and its references, and measure them."""
+    family, name, edits, k, deep = job
+    p = patch.from_dict(patch_dict(edits))
     t0 = time.perf_counter()
     ship = synthesize(p, k=k)
     t_ship = time.perf_counter() - t0
     ref = reference(p, REFERENCE, k=k, workers=1)
     check = reference(p, CHECK, k=k, workers=1)
     e, c = compare(ship.out, ref.out), compare(ref.out, check.out)
-    row = {
+    row: Row = {
         "family": family,
         "name": name,
         "k": k,
@@ -466,7 +575,16 @@ def run_one(args) -> dict:
     return row
 
 
-def run(args) -> None:
+def _write(out: Path, rows: Iterable[dict[str, str]]) -> None:
+    """Write rows to a fresh CSV."""
+    with out.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def run(args: argparse.Namespace) -> None:
+    """Run every fixture not yet in the CSV, longest first, in parallel processes, appending each result."""
     todo = [f for f in fixtures() if not args.family or f[0] in args.family]
     out = Path(args.out or ROOT / f"docs/grid/k{args.k}.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -474,45 +592,44 @@ def run(args) -> None:
     if out.exists():
         # Rows whose fixture has changed since, such as a revoiced reference's ladder, are dropped and run again.
         current = {(fam, name): json.dumps(edits) for fam, name, edits in fixtures()}
-        rows = list(csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines()))
+        rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
         kept = [r for r in rows if current.get((r["family"], r["name"])) == r["edits"]]
         if len(kept) < len(rows):
-            print(f"dropping {len(rows) - len(kept)} rows whose fixtures changed", flush=True)
-            with open(out, "w", newline="") as f:
-                w = csv.DictWriter(f, FIELDS)
-                w.writeheader()
-                w.writerows(kept)
+            say(f"dropping {len(rows) - len(kept)} rows whose fixtures changed")
+            _write(out, kept)
         done = {(r["family"], r["name"]) for r in kept}
     jobs = [
-        (fam, name, edits, args.k, i % 10 == 0 and fam != "longest")
+        (fam, name, edits, args.k, i % DEEP_EVERY == 0 and fam != "longest")
         for i, (fam, name, edits) in enumerate(todo)
         if (fam, name) not in done
     ]
     # The longest fixtures first, so the pool never waits on a straggler at the end.
-    jobs.sort(key=lambda j: -P.from_dict(patch_dict(j[2])).length_ms)
-    print(f"{len(jobs)} fixtures to run at K = {args.k} ({len(done)} already in {out})", flush=True)
+    jobs.sort(key=lambda j: -patch.from_dict(patch_dict(j[2])).length_ms)
+    say(f"{len(jobs)} fixtures to run at K = {args.k} ({len(done)} already in {out})")
     start = time.perf_counter()
     fresh = not out.exists()
-    with open(out, "a", newline="") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with out.open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()
         for i, row in enumerate(pool.map(run_one, jobs, chunksize=1)):
             w.writerow(row)
             f.flush()
-            if (i + 1) % 25 == 0:
-                print(f"  {i + 1}/{len(jobs)} after {time.perf_counter() - start:.0f} s", flush=True)
-    print(f"done in {time.perf_counter() - start:.0f} s")
+            if (i + 1) % REPORT_EVERY == 0:
+                say(f"  {i + 1}/{len(jobs)} after {time.perf_counter() - start:.0f} s")
+    say(f"done in {time.perf_counter() - start:.0f} s")
 
 
-def load(path, saturation: float = SATURATION) -> list[dict]:
-    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
+def load(path: str | os.PathLike[str], saturation: float = SATURATION) -> list[Row]:
+    """Read a grid's results, and judge each fixture by the rule at a saturation coefficient."""
+    rows: list[Row] = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in FIELDS[2:-1]:
             r[key] = float(r[key]) if r.get(key) not in (None, "") else math.nan
         near = r["peak"] < QUIET
-        r["pass"] = r["max_abs"] <= FLOOR if near else (r["e_rel"] <= -100 and r["e_max"] <= -100)
-        r["converged"] = r["c_abs"] <= FLOOR / 10 if near else (r["c_rel"] <= -120 and r["c_max"] <= -120)
+        r["pass"] = r["max_abs"] <= FLOOR if near else (r["e_rel"] <= LIMIT_DB and r["e_max"] <= LIMIT_DB)
+        converged = r["c_rel"] <= CONVERGED_DB and r["c_max"] <= CONVERGED_DB
+        r["converged"] = r["c_abs"] <= FLOOR / 10 if near else converged
         q = r["knee"]
         r["saturation"] = math.exp(-(math.pi**2) / q) * r["peak"] if q > 0 else 0.0  # per unit coefficient
         r["allowed"] = LIMIT * r["peak"] if not near else FLOOR
@@ -523,8 +640,8 @@ def load(path, saturation: float = SATURATION) -> list[dict]:
     return rows
 
 
-def fit_saturation(rows) -> tuple[float, dict | None]:
-    """The smallest coefficient that covers every converged fixture with at least 6 dB of margin (plan §5).
+def fit_saturation(rows: Iterable[Row]) -> tuple[float, Row | None]:
+    """Return the smallest coefficient that covers every converged fixture with at least 6 dB of margin (plan §5).
 
     Where the measured error exceeds the kink bound, the saturation term must
     cover the rest twice over: C · e^(−π²/q) · P ≥ 2 · (measured − kink bound).
@@ -538,79 +655,98 @@ def fit_saturation(rows) -> tuple[float, dict | None]:
     return need, worst
 
 
-def analyze(args) -> None:
+def _kinks(rows: list[Row]) -> None:
+    """Report the undriven fixtures, and any whose measured error comes near the kink bound."""
+    linear = [r for r in rows if r["alpha"] == 0.0 and r["converged"]]
+    misses = [r for r in linear if r["max_abs"] > r["kink"] and r["max_abs"] > ROUNDING * r["peak"]]
+    thin = [r for r in linear if 2 * r["max_abs"] > r["kink"] and r["max_abs"] > ROUNDING * r["peak"]]
+    say(
+        f"  undriven fixtures {len(linear)}: pass {sum(r['pass'] for r in linear)}; the kink bound is exceeded by "
+        f"the measured error in {len(misses)}, and within 6 dB of it in {len(thin)}",
+    )
+    for r in misses + thin:
+        say(f"    {r['family']}/{r['name']}: measured {r['max_abs']:.3g}, bound {r['kink']:.3g}")
+
+
+def _inside(rows: list[Row]) -> None:
+    """Report the fixtures inside the domain: any failing, the worst error and the least conservative prediction."""
+    inside = [r for r in rows if r["inside"]]
+    bad = [r for r in inside if not (r["pass"] and r["converged"])]
+    say(f"  inside the validated domain: {len(inside)}; of those failing or unconverged: {len(bad)}")
+    for r in bad:
+        say(f"    {r['family']}/{r['name']}: E_max {r['e_max']:.1f} dB, convergence {r['c_max']:.1f} dB")
+    loud = [r for r in inside if r["peak"] >= QUIET]
+    if loud:
+        w = max(loud, key=lambda r: r["e_max"])
+        say(f"  worst error inside: E_max {w['e_max']:.1f} dB ({w['family']}/{w['name']})")
+        m = min(loud, key=lambda r: 20 * math.log10(r["predicted"] / r["max_abs"]) if r["max_abs"] > 0 else INF)
+        if m["max_abs"] > 0:
+            above = 20 * math.log10(m["predicted"] / m["max_abs"])
+            say(f"  least conservative inside: predicted {above:.1f} dB above measured ({m['family']}/{m['name']})")
+
+
+def _references(rows: list[Row]) -> None:
+    """Report the rule's caution, the unconverged references and the deeper checks."""
+    caution = sum(1 for r in rows if not r["inside"] and r["pass"] and r["converged"])
+    say(f"  outside but passing (the rule's caution): {caution}")
+    for r in (r for r in rows if not r["converged"]):
+        say(f"    unconverged: {r['family']}/{r['name']}: 128×/256× agree to {r['c_max']:.1f} dB")
+    checks = [r for r in rows if not math.isnan(r["c3_max"])]
+    if checks:
+        better = sum(1 for r in checks if r["c3_max"] <= r["c_max"] + 1e-9 or r["c3_max"] <= DEEP_FLOOR_DB)
+        say(f"  512× check on {len(checks)} fixtures: 256×/512× agree at least as well as 128×/256× in {better}")
+
+
+def _families(rows: list[Row]) -> None:
+    """Report each family's counts and its worst error inside, and the time per fixture."""
+    say(f"  {'family':10s} {'n':>4s} {'inside':>7s} {'pass':>5s} {'unconverged':>12s} {'worst inside':>13s}")
+    families: dict[str, list[float]] = {}
+    for r in rows:
+        f = families.setdefault(r["family"], [0, 0, 0, 0, -INF])
+        f[0] += 1
+        f[1] += r["inside"]
+        f[2] += r["pass"] and r["converged"]
+        f[3] += not r["converged"]
+        if r["inside"] and r["peak"] >= QUIET:
+            f[4] = max(f[4], r["e_max"])
+    for name, (n, i, ok, unconv, w) in families.items():
+        say(f"  {name:10s} {n:4.0f} {i:7.0f} {ok:5.0f} {unconv:12.0f} {w:13.1f}")
+    times = sorted(r["total_s"] for r in rows)
+    say(f"  time per fixture: median {times[len(times) // 2]:.1f} s, max {times[-1]:.0f} s")
+
+
+def analyze(args: argparse.Namespace) -> None:
+    """Report each grid: its fixtures, the kink bound, the coefficient the rule needs, and the domain it gives."""
     for path in args.csv:
         rows = load(path)
-        k = int(rows[0]["k"])
         conv = [r for r in rows if r["converged"]]
         need, worst = fit_saturation(rows)
-        linear = [r for r in rows if r["alpha"] == 0.0 and r["converged"]]
-        misses = [r for r in linear if r["max_abs"] > r["kink"] and r["max_abs"] > 1e-15 * r["peak"]]
-        thin = [r for r in linear if 2 * r["max_abs"] > r["kink"] and r["max_abs"] > 1e-15 * r["peak"]]
-        print(f"\n{path}: K = {k}, {len(rows)} fixtures")
-        print(f"  pass {sum(r['pass'] for r in rows)}, converged references {len(conv)}")
-        print(
-            f"  undriven fixtures {len(linear)}: pass {sum(r['pass'] for r in linear)}; the kink bound is exceeded by "
-            f"the measured error in {len(misses)}, and within 6 dB of it in {len(thin)}",
-        )
-        for r in misses + thin:
-            print(f"    {r['family']}/{r['name']}: measured {r['max_abs']:.3g}, bound {r['kink']:.3g}")
+        say(f"\n{path}: K = {int(rows[0]['k'])}, {len(rows)} fixtures")
+        say(f"  pass {sum(r['pass'] for r in rows)}, converged references {len(conv)}")
+        _kinks(rows)
         text = f"  saturation coefficient for 6 dB of margin on every converged fixture: {need:.3g}"
         if worst:
             text += f" ({worst['family']}/{worst['name']})"
-        print(text + f"; the rule uses {SATURATION:g}")
+        say(text + f"; the rule uses {SATURATION:g}")
         rows = load(path, max(need, SATURATION))
-        inside = [r for r in rows if r["inside"]]
-        bad = [r for r in inside if not (r["pass"] and r["converged"])]
-        print(f"  inside the validated domain: {len(inside)}; of those failing or unconverged: {len(bad)}")
-        for r in bad:
-            print(f"    {r['family']}/{r['name']}: E_max {r['e_max']:.1f} dB, convergence {r['c_max']:.1f} dB")
-        loud = [r for r in inside if r["peak"] >= QUIET]
-        if loud:
-            w = max(loud, key=lambda r: r["e_max"])
-            print(f"  worst error inside: E_max {w['e_max']:.1f} dB ({w['family']}/{w['name']})")
-            m = min(loud, key=lambda r: 20 * math.log10(r["predicted"] / r["max_abs"]) if r["max_abs"] > 0 else INF)
-            if m["max_abs"] > 0:
-                print(
-                    f"  least conservative inside: predicted {20 * math.log10(m['predicted'] / m['max_abs']):.1f} dB "
-                    f"above measured ({m['family']}/{m['name']})",
-                )
-        caution = sum(1 for r in rows if not r["inside"] and r["pass"] and r["converged"])
-        print(f"  outside but passing (the rule's caution): {caution}")
-        unconverged = [r for r in rows if not r["converged"]]
-        for r in unconverged:
-            print(f"    unconverged: {r['family']}/{r['name']}: 128×/256× agree to {r['c_max']:.1f} dB")
-        checks = [r for r in rows if not math.isnan(r["c3_max"])]
-        if checks:
-            better = sum(1 for r in checks if r["c3_max"] <= r["c_max"] + 1e-9 or r["c3_max"] <= -200)
-            print(f"  512× check on {len(checks)} fixtures: 256×/512× agree at least as well as 128×/256× in {better}")
-        print(f"  {'family':10s} {'n':>4s} {'inside':>7s} {'pass':>5s} {'unconverged':>12s} {'worst inside':>13s}")
-        families: dict[str, list] = {}
-        for r in rows:
-            f = families.setdefault(r["family"], [0, 0, 0, 0, -INF])
-            f[0] += 1
-            f[1] += r["inside"]
-            f[2] += r["pass"] and r["converged"]
-            f[3] += not r["converged"]
-            if r["inside"] and r["peak"] >= QUIET:
-                f[4] = max(f[4], r["e_max"])
-        for name, (n, i, ok, unconv, w) in families.items():
-            print(f"  {name:10s} {n:4d} {i:7d} {ok:5d} {unconv:12d} {w:13.1f}")
-        times = sorted(r["total_s"] for r in rows)
-        print(f"  time per fixture: median {times[len(times) // 2]:.1f} s, max {times[-1]:.0f} s")
+        _inside(rows)
+        _references(rows)
+        _families(rows)
 
 
-def list_fixtures(args) -> None:
+def list_fixtures(args: argparse.Namespace) -> None:
+    """List the fixtures, and count them by family."""
     rows = [f for f in fixtures() if not args.family or f[0] in args.family]
     counts: dict[str, int] = {}
     for fam, name, _ in rows:
         counts[fam] = counts.get(fam, 0) + 1
         if args.verbose:
-            print(f"{fam}/{name}")
-    print(json.dumps(counts), sum(counts.values()))
+            say(f"{fam}/{name}")
+    say(f"{json.dumps(counts)} {sum(counts.values())}")
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the grid tool."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")

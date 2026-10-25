@@ -10,7 +10,7 @@ rendered before, so it computes its tables, as every new take does; a repeat
 of the same take finds them cached, as audition's re-renders do. Both are
 reported, and the budget applies to the first. Times include the report.
 
-    python tools/bench.py
+    uv run python -m tools.bench
 """
 
 from __future__ import annotations

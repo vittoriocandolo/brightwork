@@ -10,17 +10,20 @@ from scipy import stats
 from brightwork_synth import spectrum as sp
 
 
-def test_the_grid_reaches_20_khz_in_eighths_of_a_hertz():
-    assert sp.BINS / sp.BINS_PER_HZ == 20000.0 and sp.PERIOD * sp.BINS_PER_HZ // sp.BINS_PER_HZ == 8
-    assert sp.grid_bin(205.3) == 1642 and sp.grid_bin(800.0) == 6400
+def test_the_grid_reaches_20_khz_in_eighths_of_a_hertz() -> None:
+    assert sp.BINS / sp.BINS_PER_HZ == 20000.0
+    assert sp.PERIOD * sp.BINS_PER_HZ // sp.BINS_PER_HZ == 8
+    assert sp.grid_bin(205.3) == 1642
+    assert sp.grid_bin(800.0) == 6400
     for hz in np.random.default_rng(1).uniform(20, 20000, 1000):
         assert abs(sp.grid_bin(hz) / 8 - hz) <= 1 / 16
 
 
-def test_streams_are_prefix_stable_and_separated():
+def test_streams_are_prefix_stable_and_separated() -> None:
     a = sp.strike_excitation(1, 1, 100)
     b = sp.strike_excitation(1, 1, 1000)
-    assert np.array_equal(a[0], b[0][:100]) and np.array_equal(a[1], b[1][:100])
+    assert np.array_equal(a[0], b[0][:100])
+    assert np.array_equal(a[1], b[1][:100])
     assert np.array_equal(sp.mode_offsets(1, 50), sp.mode_offsets(1, 500)[:50])
     assert np.array_equal(sp.dither(3, 2, 64), sp.dither(3, 2, 4096)[:64])
     # Different keys, seeds and takes give unrelated streams.
@@ -34,7 +37,7 @@ def test_streams_are_prefix_stable_and_separated():
         sp.mode_offsets(-1, 10)
 
 
-def test_excitation_is_rayleigh_and_uniform():
+def test_excitation_is_rayleigh_and_uniform() -> None:
     rho, theta = sp.noise_excitation(7, 1)
     assert stats.kstest(rho, stats.rayleigh.cdf).pvalue > 1e-3
     assert stats.kstest(theta / (2 * np.pi), "uniform").pvalue > 1e-3
@@ -44,7 +47,7 @@ def test_excitation_is_rayleigh_and_uniform():
     assert stats.kstest(theta / (2 * np.pi), "uniform").pvalue > 1e-3
 
 
-def test_one_mode_per_cell_near_a_uniform_place_in_it():
+def test_one_mode_per_cell_near_a_uniform_place_in_it() -> None:
     offsets = []
     for seed in range(2000):
         s = 1.0 + (seed % 7) * 13.37
@@ -65,7 +68,7 @@ def test_one_mode_per_cell_near_a_uniform_place_in_it():
     assert stats.kstest(np.concatenate(offsets), "uniform").pvalue > 1e-3
 
 
-def test_takes_keep_the_modes_and_redraw_their_excitation():
+def test_takes_keep_the_modes_and_redraw_their_excitation() -> None:
     a, b = sp.noise_lines(5, 1, 16.0), sp.noise_lines(5, 2, 16.0)
     assert np.array_equal(a.bins, b.bins)
     assert not np.array_equal(np.abs(a.amps), np.abs(b.amps))
@@ -77,7 +80,7 @@ def test_takes_keep_the_modes_and_redraw_their_excitation():
     assert stats.kstest((np.angle(rows[:, 7]) / (2 * np.pi)) % 1.0, "uniform").pvalue > 1e-3
 
 
-def test_pitch_scales_every_mode_to_within_a_bin():
+def test_pitch_scales_every_mode_to_within_a_bin() -> None:
     # The ideal position s·(i + u_i) scales exactly; each mode sounds within one bin of it.
     for seed in (1, 2, 3):
         for s, ratio in ((16.0, 2.0**0.5), (12.5, 1.5), (30.0, 0.5)):
@@ -93,12 +96,13 @@ def test_pitch_scales_every_mode_to_within_a_bin():
             assert np.array_equal(a.amps[:n], b.amps[:n])
 
 
-def test_square_partials_are_their_odd_harmonics_up_to_20_khz():
+def test_square_partials_are_their_odd_harmonics_up_to_20_khz() -> None:
     bins, amps, args = sp.tone_lines([(205.3, 0.0), (540.0, -6.0)], "square", np.array([0.0, 0.0]))
     k1, k2 = sp.grid_bin(205.3), sp.grid_bin(540.0)
     first = bins[: (sp.BINS // k1 + 1) // 2]
     n = np.arange(1, sp.BINS // k1 + 1, 2)
-    assert np.array_equal(first, n * k1) and first[-1] <= sp.BINS < first[-1] + 2 * k1
+    assert np.array_equal(first, n * k1)
+    assert first[-1] <= sp.BINS < first[-1] + 2 * k1
     np.testing.assert_allclose(amps[: n.size], 1 / n, rtol=1e-15)
     rest = bins[n.size :]
     assert np.array_equal(rest, np.arange(1, sp.BINS // k2 + 1, 2) * k2)
@@ -106,16 +110,18 @@ def test_square_partials_are_their_odd_harmonics_up_to_20_khz():
     # A struck square starts at zero: every harmonic is sin(nωt).
     np.testing.assert_allclose(args, -np.pi / 2, rtol=0, atol=0)
     bins, amps, args = sp.tone_lines([(1000.0, 0.0)], "sine", np.array([1.0]))
-    assert list(bins) == [8000] and list(amps) == [1.0] and args[0] == pytest.approx(1.0 - np.pi / 2)
+    assert list(bins) == [8000]
+    assert list(amps) == [1.0]
+    assert args[0] == pytest.approx(1.0 - np.pi / 2)
 
 
-def test_free_phases_are_uniform_across_takes():
+def test_free_phases_are_uniform_across_takes() -> None:
     phases = np.array([sp.free_phases(3, t, 1, 6) for t in range(1, 2001)])
     assert stats.kstest(phases[:, 2] / (2 * np.pi), "uniform").pvalue > 1e-3
     assert not np.array_equal(sp.free_phases(3, 1, 1, 6), sp.free_phases(3, 1, 2, 6))
 
 
-def test_calibration_sets_the_mean_square_to_one_half():
+def test_calibration_sets_the_mean_square_to_one_half() -> None:
     for spacing in (0.0, 1.0, 16.0, 200.0):
         lines = sp.noise_lines(3, 1, spacing)
         for band in ((20.0, 20000.0), (6000.0, 16000.0), (5000.0, 5001.0)):
@@ -135,7 +141,7 @@ def test_calibration_sets_the_mean_square_to_one_half():
         assert 0.5 * math.fsum((np.abs(a) ** 2).tolist()) == pytest.approx(0.5, rel=1e-14)
 
 
-def test_editing_a_band_reweights_the_same_lines():
+def test_editing_a_band_reweights_the_same_lines() -> None:
     for spacing in (0.0, 14.0):
         lines = sp.noise_lines(2, 3, spacing)
         f = lines.bins / sp.BINS_PER_HZ
@@ -144,10 +150,11 @@ def test_editing_a_band_reweights_the_same_lines():
         weight = np.sqrt(sp.band_power(5000.0, 12000.0, f) / sp.band_power(6000.0, 16000.0, f))
         ratio = (b / a) / weight  # the same lines, phases and draws: only a real weight and one constant differ
         np.testing.assert_allclose(ratio, ratio[0], rtol=1e-12)
-        assert ratio[0].imag == 0 and ratio[0].real > 0
+        assert ratio[0].imag == 0
+        assert ratio[0].real > 0
 
 
-def test_sources_correlate_as_their_bands_overlap():
+def test_sources_correlate_as_their_bands_overlap() -> None:
     # Plan §2.4: noise sources share one noise, so two bands of it are coherent where their skirts overlap, and
     # noise and modes are independent draws. Over the period, the correlation of two carriers is Re Σ a·conj(b)
     # over their mean squares of ½; its mean over takes is the bands' cosine similarity, since E[ρ²] = 2.
@@ -168,36 +175,42 @@ def test_sources_correlate_as_their_bands_overlap():
     expected = np.sum(ha * hb) / np.sqrt(np.sum(ha**2) * np.sum(hb**2))
     w = ha * hb / np.sqrt(4 * np.sum(ha**2) * np.sum(hb**2))  # each line's weight on ρ², whose variance is 4
     sigma = np.sqrt(4 * np.sum(w**2) / 200)
-    assert 0.5 < expected < 0.95 and abs(np.mean(coherent) - expected) < 4 * sigma
+    assert 0.5 < expected < 0.95
+    assert abs(np.mean(coherent) - expected) < 4 * sigma
     assert abs(np.mean(independent)) < 4 * np.mean(spread) / np.sqrt(200)
     # One band is one noise: the same lines, so the same carrier.
     again = sp.calibrated(n.bins, n.amps, a_band, random=True)
     assert np.array_equal(again, a)
 
 
-def test_layout_steps_and_windows():
+def test_layout_steps_and_windows() -> None:
     for f_ref, damping, bloom in ((300.0, 1.0, 0.0), (6000.0, 0.5, 0.0), (20.0, 0.67, 0.2), (300.0, 0.3, 1.2)):
         lay = sp.layout(f_ref, damping, bloom)
         c = lay.centres
-        assert c[0] == f_ref and c[-1] >= sp.TOP_HZ and (lay.count == 1 or c[-2] < sp.TOP_HZ)
+        assert c[0] == f_ref
+        assert c[-1] >= sp.TOP_HZ
+        assert lay.count == 1 or c[-2] < sp.TOP_HZ
         assert lay.count == 1 + math.ceil(2 * max(damping, bloom) * math.log2(20000 / f_ref) - 1e-12)
         top = max(damping, bloom)
         for row in (lay.compression(damping), lay.stretch(bloom)):
-            assert row[0] == 1.0 and np.all(np.diff(np.log2(row)) <= 0.5 * (1 + 1e-12))
+            assert row[0] == 1.0
+            assert np.all(np.diff(np.log2(row)) <= 0.5 * (1 + 1e-12))
         np.testing.assert_allclose(lay.compression(damping), (c / f_ref) ** damping, rtol=1e-13)
         np.testing.assert_allclose(lay.stretch(bloom), (c / f_ref) ** bloom, rtol=1e-13)
         hz = np.geomspace(1 / 8, 20000.0, 50001)
         w = lay.windows(hz)
         assert np.max(np.abs(w.sum(axis=0) - 1.0)) <= 1e-15
         assert np.all(w >= 0)
-        assert np.all(w[0, hz <= f_ref] == 1.0) and np.all(w[1:, hz <= f_ref] == 0.0)
-        assert top > 0 and lay.step == pytest.approx(1 / (2 * top))
+        assert np.all(w[0, hz <= f_ref] == 1.0)
+        assert np.all(w[1:, hz <= f_ref] == 0.0)
+        assert top > 0
+        assert lay.step == pytest.approx(1 / (2 * top))
     assert sp.layout(300.0, 0.0, 0.0).count == 1
     assert sp.worst_compression(300.0, 1.0, 0.0) == pytest.approx(20000 / 300)
     assert sp.worst_compression(20000.0, 3.0, 3.0) == 1.0
 
 
-def test_the_mix_between_centres_stays_near_the_power_law():
+def test_the_mix_between_centres_stays_near_the_power_law() -> None:
     # An exponential decay at f should be s(f) = (f/f_ref)^damping times faster; a line between two centres takes
     # the mix of their envelopes instead. Plan §2.6: when the line should be 20, 40 or 60 dB down, the mix is at
     # most 0.9, 2.4 or 4.5 dB louder and 0.6, 0.8 or 0.8 dB quieter, at any damping.
@@ -215,7 +228,7 @@ def test_the_mix_between_centres_stays_near_the_power_law():
             assert np.all(np.abs(excess[at]) < 1e-12)
 
 
-def test_sub_bands_sum_to_the_source():
+def test_sub_bands_sum_to_the_source() -> None:
     lines = sp.noise_lines(9, 1, 0.0)
     a = sp.calibrated(lines.bins, lines.amps, (300.0, 18000.0), random=True)
     parts = sp.split(lines.bins, a, sp.layout(300.0, 1.0, 0.0))
@@ -224,15 +237,17 @@ def test_sub_bands_sum_to_the_source():
         total[p.bins] += p.amps
     np.testing.assert_allclose(total[lines.bins], a, rtol=1e-15, atol=1e-15 * np.max(np.abs(a)))
     single = sp.split(lines.bins, a, sp.layout(300.0, 0.0, 0.0))
-    assert len(single) == 1 and single[0].amps is a
+    assert len(single) == 1
+    assert single[0].amps is a
 
 
-def test_coincident_lines_add():
+def test_coincident_lines_add() -> None:
     bins, amps = sp.merged(np.array([5, 3, 5]), np.array([1 + 0j, 2j, 1j]))
-    assert list(bins) == [3, 5] and list(amps) == [2j, 1 + 1j]
+    assert list(bins) == [3, 5]
+    assert list(amps) == [2j, 1 + 1j]
 
 
-def test_dither_is_triangular_and_never_reaches_one_lsb():
+def test_dither_is_triangular_and_never_reaches_one_lsb() -> None:
     d = sp.dither(11, 1, 200_000)
     assert np.all(np.abs(d) < 1)
     assert stats.kstest(d, stats.triang(c=0.5, loc=-1, scale=2).cdf).pvalue > 1e-3

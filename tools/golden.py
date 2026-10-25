@@ -11,15 +11,13 @@ and 96 kHz exports and a stereo pair. They are not the references, whose
 voicing may still change. Only regenerate them for a deliberate change to the
 sound, and say so in the commit.
 
-    python tools/golden.py
+    uv run python -m tools.golden
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brightwork_synth.patch import loads
 from brightwork_synth.render import export, render_takes

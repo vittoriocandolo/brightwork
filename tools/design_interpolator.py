@@ -6,8 +6,8 @@
 The renderer never designs its interpolators: it loads these coefficients and
 checks their SHA-256. Run this only to change the rendering policy.
 
-    python tools/design_interpolator.py            # write the shipped designs
-    python tools/design_interpolator.py --check    # compare a fresh design with the shipped data
+    uv run python -m tools.design_interpolator            # write the shipped designs
+    uv run python -m tools.design_interpolator --check    # compare a fresh design with the shipped data
 
 Design: a Kaiser-windowed sinc at 280 dB, cut off at R/2 for the table rate
 R = 2 × base, flat to 20 kHz and stopped from R − 20 kHz, sized by Kaiser's
@@ -26,8 +26,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brightwork_synth import carrier, spectrum
 

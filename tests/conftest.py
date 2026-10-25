@@ -1,11 +1,16 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""What the tests share: the plan's example patch and tone, and ways to edit them by path."""
+
 import copy
 import re
 import tomllib
+from typing import Any
 
 import pytest
+
+from brightwork_synth.patch import Patch, from_dict
 
 # The illustrative patch from the plan (§4): a closed hi-hat.
 EXAMPLE = """\
@@ -90,16 +95,20 @@ TONE = {
 
 
 @pytest.fixture
-def example_dict():
+def example_dict() -> dict[str, Any]:
+    """Return the example patch as TOML parses it, to edit freely."""
     return copy.deepcopy(tomllib.loads(EXAMPLE))
 
 
-def edit(d: dict, path: str, value) -> dict:
-    """Set a field by its patch path, counting from 1: edit(d, "noise[2].amp[3].ms", 5.0)."""
-    node = d
+def edit(d: dict[str, Any], path: str, value: object) -> dict[str, Any]:
+    """Set a field of parsed TOML by its patch path, counting from 1, such as "noise[2].amp[3].ms"."""
+    node: Any = d
     parts = path.split(".")
     for i, part in enumerate(parts):
         m = re.fullmatch(r"(\w+)(?:\[(\d+)\])?", part)
+        if m is None:
+            msg = f"{path}: not a patch path"
+            raise ValueError(msg)
         name, index = m.group(1), m.group(2)
         last = i == len(parts) - 1
         if index is None:
@@ -114,18 +123,26 @@ def edit(d: dict, path: str, value) -> dict:
     return d
 
 
-def example(tone: bool = False) -> dict:
+def example(*, tone: bool = False) -> dict[str, Any]:
+    """Return the example patch as TOML parses it; with `tone`, the plan's tone is added."""
     d = tomllib.loads(EXAMPLE)
     if tone:
         d["tone"] = [copy.deepcopy(TONE)]
     return d
 
 
-def make(tone: bool = False, **edits):
-    """The example patch with edits by path, e.g. make(**{"noise[1].chatter": 0.3}); tone=True adds the plan's tone."""
-    from brightwork_synth.patch import from_dict
+def make(**edits: object) -> Patch:
+    """Return the example patch with fields set by path, such as "noise[1].chatter"."""
+    return _made(example(), edits)
 
-    d = example(tone)
+
+def make_tone(**edits: object) -> Patch:
+    """Return the example patch with the plan's tone added, and fields set by path."""
+    return _made(example(tone=True), edits)
+
+
+def _made(d: dict[str, Any], edits: dict[str, object]) -> Patch:
+    """Build the patch with the edits applied, by path."""
     for path, value in edits.items():
         edit(d, path, value)
     return from_dict(d)
