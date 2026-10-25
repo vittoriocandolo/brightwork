@@ -53,7 +53,7 @@ import numpy as np
 from . import wav
 from .curve import Curve, amplitude_curve
 from .loudness import momentary_max
-from .patch import DEFAULT_RELEASE_MS, PatchError, choke_knots, loads
+from .patch import DEFAULT_RELEASE_MS, PatchError, choke_knots, loads, read_text
 from .render import FORMATS, RenderError, Report, db, quantize, render_takes
 
 if TYPE_CHECKING:
@@ -401,8 +401,8 @@ class Watcher:
             stamp = (st.st_mtime_ns, st.st_size)
             if stamp == self._stamp:
                 return
-            text = self.path.read_text(encoding="utf-8")
-        except OSError:
+            text = read_text(self.path)
+        except (OSError, UnicodeDecodeError):  # caught mid-save: the next poll reads it whole
             return
         self._stamp = stamp
         if text == self._text:
@@ -592,9 +592,12 @@ class Session:
     def _text(self, path: Path) -> str:
         """Read a patch file's text."""
         try:
-            return path.read_text(encoding="utf-8")
+            return read_text(path)
         except OSError as e:
             msg = f"{path}: {e.strerror}"
+            raise AuditionError(msg) from None
+        except UnicodeDecodeError:
+            msg = f"{path}: not UTF-8 or UTF-16 text"
             raise AuditionError(msg) from None
 
     def _render(self, text: str, *, first: bool = False) -> Rendered:

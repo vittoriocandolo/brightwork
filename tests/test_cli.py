@@ -4,8 +4,12 @@
 """The command line: every command, its files, its report and its errors (plan §7.6)."""
 
 import dataclasses
+import io
+import runpy
+import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import override
 
 import numpy as np
 import pytest
@@ -19,6 +23,7 @@ from brightwork_synth.render import render, render_takes
 from .conftest import EXAMPLE
 
 BAD_INPUT = 2  # the exit status for input the command cannot use
+INTERRUPTED = 130  # the exit status a shell expects after Ctrl+C
 REFUSED = 1  # the exit status for a render refused, or a verification failed
 RATE = 48000
 CHOKED_MS = 95.0  # where a choke at 60 ms with a 30 ms release ends: one step after its 60 dB fall
@@ -147,7 +152,7 @@ def test_render_writes_pcm(capsys: pytest.CaptureFixture[str], tmp_path: Path) -
 
 
 def test_errors_are_reported(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    """Report an invalid patch's every problem, a missing file, and a WAV without a patch."""
+    """Report an invalid patch's every problem, a missing file, and a WAV without a patch or not a WAV at all."""
     bad = tmp_path / "bad.toml"
     bad.write_text(EXAMPLE.replace("damping    = 0.5", "damping    = 4.0").replace("seed = 1 ", "seed = -1 "))
     code, _, err = run(capsys, "render", bad, "--out", tmp_path / "x.wav")
@@ -165,6 +170,9 @@ def test_errors_are_reported(capsys: pytest.CaptureFixture[str], tmp_path: Path)
     code, _, err = run(capsys, "extract", tmp_path / "nothing.wav")
     assert code == BAD_INPUT
     assert "nothing.wav" in err
+    text = tmp_path / "text.wav"
+    text.write_text("not a wave")
+    assert run(capsys, "extract", text) == (BAD_INPUT, "", f"{text}: not a RIFF WAVE file\n")
 
 
 def test_pitch(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
@@ -321,3 +329,71 @@ def test_audition_arguments(capsys: pytest.CaptureFixture[str], example: Path, m
     code, _, err = run(capsys, "audition", example, "--pattern", "1,0")
     assert code == BAD_INPUT
     assert "--pattern needs --bpm" in err
+
+
+def test_patches_in_utf16_or_undecodable(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Read a patch saved as UTF-16 with a BOM, and refuse one that is not text."""
+    wide = tmp_path / "wide.toml"
+    wide.write_bytes(EXAMPLE.encode("utf-16"))
+    code, out, _ = run(capsys, "pitch", wide, "+0")
+    assert code == 0
+    assert loads(out) == loads(EXAMPLE)
+    garbled = tmp_path / "garbled.toml"
+    garbled.write_bytes(b"seed = \xff\n")
+    code, _, err = run(capsys, "render", garbled, "--out", tmp_path / "x.wav")
+    assert code == BAD_INPUT
+    assert err == f"{garbled}: invalid patch\n  not UTF-8 or UTF-16 text\n"
+
+
+def test_malformed_arguments_are_named(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Name each malformed note value, pattern, choke and kit group before anything runs."""
+    for args, message in (
+        (["audition", example, "--bpm", "120", "--every", "eighth"], "expected a note value such as 1/8"),
+        (["audition", example, "--bpm", "120", "--pattern", "1,-1"], "a pattern lists patch numbers from 1"),
+        (["pack", "42=x.toml", "--choke", "46:x", "--out", "kit"], "expected A:B,C"),
+        (["pack", "hat.toml", "--out", "kit"], "expected KEY=PATCH[,PATCH…]"),
+        (["pack", "200=x.toml", "--out", "kit"], "MIDI keys run from 0 to 127, found 200"),
+        (["pack", "42=,", "--out", "kit"], "key 42 needs at least one patch"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.main([str(a) for a in args])
+        assert e.value.code == BAD_INPUT
+        assert message in capsys.readouterr().err
+
+
+def test_an_interrupt_or_a_closed_reader_ends_quietly(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    example: Path,
+) -> None:
+    """Exit 130 on Ctrl+C, and 0 when the reader of standard output goes away, without a traceback."""
+
+    def interrupted(*_: object, **__: object) -> None:
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as m:
+        m.setattr(cli, "verify", interrupted)
+        assert run(capsys, "verify", example) == (INTERRUPTED, "", "")
+
+    class Gone(io.StringIO):
+        @override
+        def write(self, s: str, /) -> int:
+            raise BrokenPipeError
+
+    stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", Gone())
+    monkeypatch.setattr(sys, "stderr", stderr)
+    assert cli.main(["init", "closed"]) == 0
+    assert stderr.closed
+
+
+def test_python_dash_m_runs_the_command_line(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run the package as a module, as `python -m brightwork_synth init closed` does."""
+    monkeypatch.setattr(sys, "argv", ["brightwork", "init", "closed"])
+    with pytest.raises(SystemExit) as caught:
+        runpy.run_module("brightwork_synth", run_name="__main__")
+    assert caught.value.code == 0
+    assert capsys.readouterr().out == dumps(loads(cli.reference_text("closed")))

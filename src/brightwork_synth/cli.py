@@ -9,6 +9,7 @@ The editing commands, pitch | stretch | choke | softer, print a complete, canoni
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import sys
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING
 from . import wav
 from .audition import Settings, audition
 from .pack import Options, pack
-from .patch import DEFAULT_RELEASE_MS, Patch, PatchError, choke, dumps, loads, pitch, softer, stretch
+from .patch import DEFAULT_RELEASE_MS, Patch, PatchError, choke, dumps, load, loads, pitch, softer, stretch
 from .reference import verify
 from .render import FORMATS, RenderError, db, export, render_takes
 
@@ -36,36 +37,39 @@ def reference_text(name: str) -> str:
     return resources.files("brightwork_synth").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
 
 
-def _read(path: str) -> str:
-    """Read a patch file's text, or exit with what the system said about it."""
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except OSError as e:
-        raise SystemExit(_fail(f"{path}: {e.strerror}")) from None
+class CliError(Exception):
+    """A message for stderr, and the exit status: 2 for bad input, 1 for a refusal or a failure."""
+
+    def __init__(self, message: str, status: int = 2) -> None:
+        """Keep the message, and the status to exit with."""
+        super().__init__(message)
+        self.status = status
 
 
-def _fail(message: str, code: int = 2) -> int:
-    """Say what went wrong on standard error, and return the exit status."""
-    sys.stderr.write(f"{message}\n")
-    return code
+def _listing(head: str, problems: Sequence[str]) -> CliError:
+    """Make an error of `head`, then every problem, indented."""
+    return CliError("\n".join([head, *(f"  {m}" for m in problems)]))
 
 
 def _patch(path: str) -> Patch:
-    """Read a patch file, or exit with every problem it has."""
+    """Read a patch file."""
     try:
-        return loads(_read(path))
+        return load(path)
+    except OSError as e:
+        msg = f"{path}: {e.strerror or e}"
+        raise CliError(msg) from None
     except PatchError as e:
-        raise SystemExit(_fail(f"{path}: invalid patch\n" + "\n".join(f"  {m}" for m in e.problems))) from None
+        msg = f"{path}: invalid patch"
+        raise _listing(msg, e.problems) from None
 
 
 def _edit(path: str, what: str, edit: Callable[..., Patch], *args: object) -> int:
-    """Apply an editing command and print the patch, or say why it cannot be done."""
-    p = _patch(path)
+    """Apply an editing command and print the patch."""
     try:
-        q = edit(p, *args)
-    except (ValueError, PatchError) as e:
-        problems = e.problems if isinstance(e, PatchError) else [str(e)]
-        return _fail(f"{path}: cannot {what}\n" + "\n".join(f"  {m}" for m in problems))
+        q = edit(_patch(path), *args)
+    except PatchError as e:
+        msg = f"{path}: cannot {what}"
+        raise _listing(msg, e.problems) from None
     sys.stdout.write(dumps(q))
     return 0
 
@@ -108,13 +112,16 @@ def file_paths(out: str, files: int) -> list[Path]:
 def cmd_render(args: argparse.Namespace) -> int:
     """Render a patch, its takes or its stereo pairs, and write the files unless they would clip."""
     p = _patch(args.patch)
-    if args.allow_over and FORMATS[p.output.format] is not None:
-        return _fail("--allow-over writes float32 only: PCM cannot hold samples beyond full scale")
+    pcm = FORMATS[p.output.format] is not None
+    if args.allow_over and pcm:
+        msg = "--allow-over writes float32 only: PCM cannot hold samples beyond full scale"
+        raise CliError(msg)
     try:
         audio, report = render_takes(p, args.takes, level_match=args.level_match, stereo=args.stereo)
     except RenderError as e:
-        return _fail(f"{args.patch}: {e}")
-    if not report.over or (args.allow_over and FORMATS[p.output.format] is None):
+        msg = f"{args.patch}: {e}"
+        raise CliError(msg) from None
+    if not report.over or args.allow_over:
         # Every file first, then the report: a closed output never leaves a set half written.
         paths = file_paths(args.out, len(report.files))
         for path, a, f in zip(paths, audio, report.files, strict=True):
@@ -122,18 +129,18 @@ def cmd_render(args: argparse.Namespace) -> int:
         sys.stdout.write(f"{report}\n" + "".join(f"wrote {path}\n" for path in paths))
         return 0
     sys.stdout.write(f"{report}\n")
-    if FORMATS[p.output.format] is not None:
-        return _fail(
+    if pcm:
+        msg = (
             f"not written: the peak is {db(report.peak):+.4f} dBFS, above {p.output.format}'s ceiling of "
             f"{db(report.ceiling):.4f} dBFS, which keeps 2 LSB for dither. Lower output.db by at least "
-            f"{db(report.peak / report.ceiling):.4f} dB.",
-            1,
+            f"{db(report.peak / report.ceiling):.4f} dB."
         )
-    return _fail(
-        f"not written: the peak is {db(report.peak):+.2f} dBFS. Lower output.db by at least "
-        f"{db(report.peak):.2f} dB, or pass --allow-over to write a float file with overs.",
-        1,
-    )
+    else:
+        msg = (
+            f"not written: the peak is {db(report.peak):+.2f} dBFS. Lower output.db by at least "
+            f"{db(report.peak):.2f} dB, or pass --allow-over to write a float file with overs."
+        )
+    raise CliError(msg, 1)
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -147,10 +154,14 @@ def cmd_extract(args: argparse.Namespace) -> int:
     """Print the patch embedded in an exported WAV."""
     try:
         found = wav.chunks(args.wav)
-    except (OSError, ValueError) as e:
-        return _fail(f"{args.wav}: {e}")
+    except OSError as e:
+        msg = f"{args.wav}: {e.strerror or e}"
+        raise CliError(msg) from None
+    except ValueError as e:
+        raise CliError(str(e)) from None
     if wav.PRIVATE not in found:
-        return _fail(f"{args.wav}: no embedded Brightwork patch")
+        msg = f"{args.wav}: no embedded Brightwork patch"
+        raise CliError(msg)
     sys.stdout.write(json.loads(found[wav.PRIVATE].decode("utf-8"))["patch"])
     return 0
 
@@ -353,18 +364,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     _render_commands(sub)
     _edit_commands(sub)
     _play_commands(sub)
+    for stream in (sys.stdout, sys.stderr):  # not the ANSI code page and CRLF of a Windows redirect
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", newline="\n")
     args = ap.parse_args(argv)
     if getattr(args, "bpm", None) is not None and not args.bpm > 0:
         ap.error("--bpm must be positive")
     try:
         code: int = args.run(args)
-    except SystemExit as e:
-        return e.code if isinstance(e.code, int) else 1
+    except CliError as e:
+        sys.stderr.write(f"{e}\n")
+        return e.status
     except BrokenPipeError:  # the reader went away, as `brightwork render … | head` does: the files are written
         sys.stderr.close()
         return 0
+    except KeyboardInterrupt:  # Ctrl+C: stop quietly, with the status a shell expects
+        return 130
     return code
-
-
-if __name__ == "__main__":
-    sys.exit(main())
