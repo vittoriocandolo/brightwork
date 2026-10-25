@@ -269,7 +269,7 @@ A band-limited square has fast edges and a Gibbs overshoot, so a driven square b
 
 ### 2.10 Output
 
-As in the snare. The decimated signal is scaled by the output gain (gain mode) or to a sample-peak target (peak mode), multiplied by the polarity, and converted to float32 once or quantized once to PCM (§7.2). Stereo is two takes, one per channel (§7.2).
+As in the snare. The decimated signal is scaled by the output gain (gain mode), to a sample-peak target (peak mode) or to a true-peak target (true-peak mode), multiplied by the polarity, and converted to float32 once or quantized once to PCM (§7.2). Stereo is two takes, one per channel (§7.2).
 
 ### 2.11 Dynamics
 
@@ -422,7 +422,7 @@ db = 0.0                    # small-signal gain; 0 = bypass
 [output]
 sample_rate = 48000
 format      = "float32"     # "float32" | "pcm24" | "pcm16"
-mode        = "gain"        # "gain" | "peak"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
 db          = -6.0          # gain in dB, or peak target in dBFS
 polarity    = 1
 ```
@@ -577,7 +577,7 @@ Each stream is indexed by cell, bin or partial, so its integer stage is platform
 As in the snare:
 
 - gain mode applies the output gain;
-- peak mode scales to a sample-peak target of at most 0 dBFS, and silence stays silence;
+- peak mode scales to a sample-peak target of at most 0 dBFS, true-peak mode to a true-peak target of at most 0 dBTP within the format's ceiling, and silence stays silence;
 - when a gain-mode render exceeds full scale, `render` refuses to write it and `audition` keeps playing the last valid buffer. Both state the peak and the reduction needed, and `--allow-over` writes a float file anyway;
 - nothing is ever clipped, and the final buffer is checked for non-finite values.
 
@@ -623,7 +623,7 @@ After each render the report shows:
 
 - per source: its kind, f_ref, number of sub-bands and, for noise, how many of its modes lie within the band's edges and their realized mean spacing; for tones, the realized partials in Hz and, for sines, as note ± cents;
 - source and exported duration, sample rate, format, seed and take, and channels;
-- sample peak in dBFS, a 4× oversampled true-peak estimate (information only), and the loudness: the largest K-weighted momentary loudness (ITU-R BS.1770, 400 ms) over every window position, counting windows that run past the end of the file, in LUFS, with channels summed as BS.1770 sums them;
+- sample peak in dBFS, the true peak in dBTP, read exactly from the decimator's output at every internal sample with a parabola through each crest, and the loudness: the largest K-weighted momentary loudness (ITU-R BS.1770, 400 ms) over every window position, counting windows that run past the end of the file, in LUFS, with channels summed as BS.1770 sums them;
 - validated-domain status and margin, the dominant cause with the knot that contributes most, named by its path, and the drive headroom; outside, the drive to lower to;
 - for sets, the loudness and peak spread of the takes;
 - render time.
@@ -814,7 +814,7 @@ It installs with pip as one package with a `cymbal` command, and its tests run o
 | `carrier.py` | Tables at 2 × base (cached), the frozen interpolators, carriers at F and at knots |
 | `voice.py` | Sources, sub-band envelopes, chatter, the damper, drive, slew statistics, the kink bound |
 | `render.py` | Rates, frozen decimators, decimation by matrix products, output stage, domain rule and drive headroom, report, takes and stereo pairs |
-| `loudness.py` | K-weighting at every export rate, momentary loudness for mono and stereo, true peak |
+| `loudness.py` | K-weighting at every export rate, momentary loudness for mono and stereo |
 | `pack.py` | Kits: keys, layers, takes, chokes, set gains and the SFZ mapping |
 | `reference.py` | The reference renderer and comparison behind `verify` |
 | `wav.py` | RIFF writing and reading, float and PCM, mono and stereo |

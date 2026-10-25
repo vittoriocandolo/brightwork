@@ -140,7 +140,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
         g = np.sort(rng.uniform(0, 1, n))[::-1]
         g[0], g[-1] = 1.0, 0.0
         damper = tuple(zip(map(float, t), map(float, g), strict=True))
-    mode = str(rng.choice(["gain", "peak"]))
+    mode = str(rng.choice(["gain", "peak", "true-peak"]))
     return patch.Patch(
         seed=int(rng.integers(0, 2**63 - 1)),
         take=int(rng.integers(1, 2**31)),
@@ -152,7 +152,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
             int(rng.choice(patch.SAMPLE_RATES)),
             str(rng.choice(patch.FORMATS)),
             mode,
-            float(rng.uniform(-60, 0 if mode == "peak" else 24)),
+            float(rng.uniform(-60, 24 if mode == "gain" else 0)),
             int(rng.choice([1, -1])),
         ),
     )
@@ -394,7 +394,7 @@ def test_damping_and_bloom_limits() -> None:
         ("output.db", [-60, 24], [-60.5, 24.5]),
         ("output.sample_rate", [44100, 48000, 88200, 96000], [22050, 192000]),
         ("output.format", ["float32", "pcm24", "pcm16"], ["pcm32", "float64", 24]),
-        ("output.mode", ["gain", "peak"], ["loudness"]),
+        ("output.mode", ["gain", "peak", "true-peak"], ["loudness"]),
         ("output.polarity", [1, -1], [0, 2]),
         ("seed", [0, 2**63 - 1], [-1, 2**63]),
         ("take", [1, 2**31], [0, 2**31 + 1]),
@@ -410,8 +410,9 @@ def test_domain_edges(path: str, good: list[object], bad: list[object]) -> None:
 
 def test_peak_target_is_at_most_full_scale() -> None:
     """Refuse a peak target above 0 dBFS."""
-    make(**{"output.mode": "peak", "output.db": 0.0})
-    assert any(m.startswith("output.db") for m in reject(**{"output.mode": "peak", "output.db": 0.1}))
+    for mode in ("peak", "true-peak"):
+        make(**{"output.mode": mode, "output.db": 0.0})
+        assert any(m.startswith("output.db") for m in reject(**{"output.mode": mode, "output.db": 0.1}))
 
 
 def test_all_problems_are_reported_together() -> None:

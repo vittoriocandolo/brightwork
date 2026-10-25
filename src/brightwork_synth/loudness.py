@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.signal import resample_poly, sosfilt
+from scipy.signal import sosfilt
 
 SHELF_HZ, SHELF_DB, SHELF_Q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
 SHELF_VB = 0.4996667741545416  # the shelf's mid-band exponent
@@ -66,9 +66,3 @@ def momentary_max(x: np.ndarray, rate: int) -> float:
     energy = np.concatenate(([0.0], np.cumsum(np.sum(z * z, axis=0))))
     ms = float(np.max(energy[w:] - energy[:-w])) / w
     return OFFSET + 10.0 * math.log10(ms) if ms > 0 else -math.inf
-
-
-def true_peak(audio: np.ndarray) -> float:
-    """Estimate the true peak by 4× oversampling, for information only."""
-    x = np.concatenate((np.asarray(audio, dtype=float), np.zeros(32)))
-    return max(float(np.max(np.abs(resample_poly(x, 4, 1)))), float(np.max(np.abs(audio), initial=0.0)))

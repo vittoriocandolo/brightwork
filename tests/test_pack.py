@@ -241,6 +241,21 @@ def test_a_kit_shares_one_gain() -> None:
     assert len({round(p, 9) for p in peaks}) == len(peaks)  # the others keep their natural levels
 
 
+def test_a_true_peak_kit_brings_its_loudest_true_peak_to_the_target() -> None:
+    """Bring the kit's highest true peak, over every file of every key, to the target, sharing one gain."""
+    true = dataclasses.replace(loads(cli.reference_text("closed")).output, mode="true-peak", db=-1.0)
+    groups = [
+        (key, [(n, dataclasses.replace(p, output=true)) for n, p in layers])
+        for key, layers in ((42, ladder("closed", (0, 10))), (46, ladder("open", (0,))))
+    ]
+    kit = pack.build(groups, pack.Options(takes=2))
+    gain = 10 ** (kit.set_gain_db / 20)
+    peaks = [
+        render.synthesize(dataclasses.replace(p, take=t)).true_peak for _, ps in groups for _, p in ps for t in (1, 2)
+    ]
+    assert 20 * math.log10(gain * max(peaks)) == pytest.approx(-1.0, abs=1e-9)
+
+
 def test_level_matching_within_each_layer() -> None:
     """Level-match each layer's files to its first."""
     kit = pack.build([(42, ladder("closed", (0, 8)))], pack.Options(takes=4, level_match=True))

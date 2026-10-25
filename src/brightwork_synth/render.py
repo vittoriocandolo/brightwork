@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Any, override
 
 import numpy as np
 import scipy
-from scipy.signal import upfirdn
+from scipy.signal import oaconvolve, upfirdn
 
 from . import __version__, carrier, spectrum, wav
-from .loudness import momentary_max, true_peak
+from .loudness import momentary_max
 from .patch import Noise, Patch, Tone, describe_pitch, dumps
 from .spectrum import MAX_TAKE
 from .voice import (
@@ -54,11 +54,16 @@ from .voice import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from numpy.typing import ArrayLike, NDArray
+
+    from .patch import Output
 
 type Floats = NDArray[np.float64]
 
 K = 32  # frozen by the adversarial grid (plan §3, docs/VALIDATION.md)
+PEAK_BLOCK = 1 << 20  # internal samples of the reconstruction measured at once
 FAMILY = {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
 
 # The validated domain (plan §5). The predicted aliasing error at unity gain is
@@ -252,6 +257,7 @@ class Synthesis:
     kink: float  # bound on the error from the curves' kinks, at unity gain and the patch's drive
     alpha: float
     band: float  # the decimator's passband edge, for the kink bound
+    true_peak: float  # the peak between the file's samples, at unity gain
     probes: Probes | None = field(default=None, compare=False, repr=False)
 
 
@@ -311,6 +317,44 @@ def interpolator_for(sample_rate: int, k: int = K) -> carrier.Interpolator:
     return carrier.interpolator(FAMILY[sample_rate], k // 2)
 
 
+def true_peak(y: Floats, taps: Floats, workers: int | None = None) -> float:
+    """Return the file's true peak from the saturator's output y: the highest crest of its reconstruction.
+
+    The decimator's output at every internal sample, before it keeps one in K, is the file's own band-limited
+    reconstruction, true to its stopband, so its peak is the peak between the file's samples, as an ideal
+    converter would play them, found to within 0.000001 dB. Every rate of a family shares it. It is measured in
+    blocks, in parallel, so a long cymbal costs no more memory than a short one.
+    """
+    n = y.size + taps.size - 1 if y.size else 0
+
+    def block(b0: int) -> float:
+        b1 = min(n, b0 + PEAK_BLOCK)
+        lo, hi = max(0, b0 - 1), min(n, b1 + 1)  # a sample either side, for the parabolas through its crests
+        s0 = max(0, lo - taps.size + 1)  # the first input that reaches output lo
+        w = oaconvolve(y[s0 : min(hi, y.size)], taps)[lo - s0 : hi - s0]
+        return float(np.max(crests(w)[b0 - lo : b1 - lo]))
+
+    starts = range(0, n, PEAK_BLOCK)
+    with ThreadPoolExecutor(min(workers or os.cpu_count() or 1, max(len(starts), 1))) as pool:
+        return max(pool.map(block, starts), default=0.0)
+
+
+def crests(w: Floats) -> Floats:
+    """Return |w|, each local peak raised to the top of the parabola through it and its two neighbours.
+
+    w is a reconstruction at K times the base rate, where a parabola finds a peak between its samples to within
+    0.000001 dB; the largest value is the true peak.
+    """
+    level = np.abs(w)
+    out = level.copy()
+    left, mid, right = level[:-2], level[1:-1], level[2:]
+    bend = left - 2 * mid + right
+    top = (mid >= left) & (mid >= right) & (bend < 0)
+    with np.errstate(divide="ignore", invalid="ignore"):  # only where it is a peak, where the bend is negative
+        out[1:-1] = np.where(top, mid - (left - right) ** 2 / (8 * bend), mid)
+    return out
+
+
 def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis:
     """Synthesize the take that p's seed and take name, at unity gain, with everything the domain rule needs."""
     v = voice(p)
@@ -324,6 +368,7 @@ def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis
     band = FAMILY[p.output.sample_rate] / 2
     kinks = kink_terms(v, ip, tabs)
     out = decimate(taps, y, factor, k)
+    peak = true_peak(y, taps)
     del y
     return Synthesis(
         out,
@@ -335,6 +380,7 @@ def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis
         kink_bound(kinks, v.alpha, rate, band),
         v.alpha,
         band,
+        peak,
         _probes(x, factor, taps, out, slew),
     )
 
@@ -733,7 +779,7 @@ class Report:
         elif self.over and f.peak == self.peak:
             peak = self._over()
         else:
-            peak = f"{db(f.peak):.2f} dBFS sample, {db(f.true_peak):.2f} dBTP true (4× estimate, information only)"
+            peak = f"{db(f.peak):.2f} dBFS sample, {db(f.true_peak):.2f} dBTP true"
         loudness = (
             f"{f.loudness:.1f} LUFS, the largest 400 ms momentary loudness (BS.1770)"
             if f.loudness > -math.inf
@@ -810,18 +856,30 @@ def take_numbers(p: Patch, files: int, *, stereo: bool = False) -> list[int]:
     return [p.take + j for j in range(renders)]
 
 
-def set_gains(outs: list[Floats], p: Patch, top: float, *, level_match: bool) -> tuple[float, list[float]]:
-    """Return one gain for the whole set, and each file's gain from level matching (1 without)."""
-    rate = p.output.sample_rate
-    gains = [1.0] * len(outs)
-    if level_match:
-        loud = [momentary_max(o, rate) for o in outs]
-        gains = [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
-    if p.output.mode == "gain":
-        return 10.0 ** (p.output.db / 20.0), gains
-    peak = max(float(np.max(np.abs(o), initial=0.0)) * g for o, g in zip(outs, gains, strict=True))
-    target = min(10.0 ** (p.output.db / 20.0), top)
-    return (target / peak if peak > 0 else 1.0), gains
+def file_gains(outs: list[Floats], rate: int, *, level_match: bool) -> list[float]:
+    """Return each file's gain from level matching to the first: 1 without, and for silence."""
+    if not level_match:
+        return [1.0] * len(outs)
+    loud = [momentary_max(o, rate) for o in outs]
+    return [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
+
+
+def set_gain(o: Output, peaks: Sequence[float], true_peaks: Sequence[float]) -> float:
+    """Return the gain every file of a set shares, from its files' sample and true peaks after their own gains.
+
+    It is `db` itself, or what brings the loudest file's sample peak or true peak to `db`, never putting a
+    sample over the format's ceiling.
+    """
+    target = float(10.0 ** (o.db / 20.0))
+    if o.mode == "gain":
+        return target
+    peak = max(peaks, default=0.0)
+    if peak == 0:
+        return 1.0
+    top = ceiling(o.format)
+    if o.mode == "peak":
+        return min(target, top) / peak
+    return min(target / max(true_peaks), top / peak)
 
 
 def output_stage(out: Floats, gain: float, polarity: int) -> NDArray[np.float32]:
@@ -850,9 +908,12 @@ def render_takes(
     width = 2 if stereo else 1
     groups = [list(range(i, i + width)) for i in range(0, len(synths), width)]
     raw = [np.stack([synths[i].out for i in g], axis=1) if stereo else synths[g[0]].out for g in groups]
-    gain, file_gains = set_gains(raw, p, top, level_match=level_match)
+    gains = file_gains(raw, p.output.sample_rate, level_match=level_match)
+    true_peaks = [max(synths[i].true_peak for i in g) * fg for g, fg in zip(groups, gains, strict=True)]
+    peaks = [float(np.max(np.abs(r), initial=0.0)) * fg for r, fg in zip(raw, gains, strict=True)]
+    gain = set_gain(p.output, peaks, true_peaks)
     audio, take_rows, file_rows = [], [], []
-    for j, (g, r, fg) in enumerate(zip(groups, raw, file_gains, strict=True), 1):
+    for j, (g, r, fg, tp) in enumerate(zip(groups, raw, gains, true_peaks, strict=True), 1):
         a = output_stage(r, gain * fg, p.output.polarity)
         if not np.all(np.isfinite(a)):
             msg = "the render produced non-finite samples"
@@ -873,13 +934,14 @@ def render_takes(
                     drive_headroom(s, p.drive.db, d),
                 ),
             )
+        peak = float(np.max(np.abs(a), initial=0.0))
         file_rows.append(
             File(
                 j,
                 tuple(g),
                 db(fg),
-                float(np.max(np.abs(a), initial=0.0)),
-                max(true_peak(a[:, c]) for c in range(width)) if stereo else true_peak(a),
+                peak,
+                max(gain * tp, peak),  # the float32 rounding of the samples aside
                 momentary_max(a, p.output.sample_rate),
             ),
         )

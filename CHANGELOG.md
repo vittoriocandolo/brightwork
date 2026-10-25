@@ -36,7 +36,8 @@ The first public release.
   note, `stretch` of chosen curves, `choke` with a 60 dB release, and
   `softer`, the same cymbal struck softer.
 - Exports at 44.1, 48, 88.2 and 96 kHz, as float32 or as 24- or 16-bit PCM
-  with seeded TPDF dither, at a gain or a sample peak, with the root key in a
+  with seeded TPDF dither, at a gain, a sample peak or a true peak, measured
+  exactly between the samples, with the root key in a
   `smpl` chunk and the patch and its provenance in a `cymb` chunk, which
   `brightwork extract` gives back. Overs are reported, never clipped.
 - Round-robin sets of takes sharing one gain, with optional level matching,

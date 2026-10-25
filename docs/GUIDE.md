@@ -159,8 +159,8 @@ one at 0 dB with 18 dB.
 |---|---|---|
 | `sample_rate` | 44100, 48000, 88200, 96000 | The file's rate. The 96 kHz file is exactly the 48 kHz one with samples filled in. |
 | `format` | `float32`, `pcm24`, `pcm16` | PCM uses the plain PCM tag that hardware samplers read, with seeded triangular dither that leaves exact zeros alone. |
-| `mode` | `gain`, `peak` | Apply `db` as a gain, or scale so the peak is at `db` dBFS. |
-| `db` | gain −60 – +24; peak −60 – 0 | See `mode`. |
+| `mode` | `gain`, `peak`, `true-peak` | Apply `db` as a gain, or scale so the sample peak is at `db` dBFS, or the true peak, between the samples, at `db` dBTP. A set or a kit shares one gain, set by its loudest file. |
+| `db` | gain −60 – +24; peak and true peak −60 – 0 | See `mode`. |
 | `polarity` | 1, −1 | Inverts the output. |
 
 A gain-mode render over full scale is refused, with the reduction it needs;
@@ -252,7 +252,7 @@ remains is its slow low end; the damper shortens the whole ring at once.
 sources  noise[1] 714 modes in 6000–16000 Hz, mean spacing 14.00 Hz; 3 sub-bands from 6000 Hz
          noise[2] continuous noise, 3000–18000 Hz; one band
 length   120.0 ms source, 121.9 ms exported (5851 samples at 48000 Hz, float32, mono), seed 1, take 1
-peak     -7.90 dBFS sample, -7.44 dBTP true (4× estimate, information only)
+peak     -7.90 dBFS sample, -7.42 dBTP true
 loudness -32.8 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -141 dB, margin 40.6 dB
          mostly kinks, 52% at noise[2].amp[2] (0.03 ms); drive headroom +26.2 dB
@@ -267,7 +267,7 @@ render   178 ms
   sub-bands, never after the damper's last knot) and the exported length,
   which includes the decimator's decaying tail. Every file starts at exactly
   zero and ends in that tail, so a sampler needs no fades.
-- **peak**: the sample peak and a 4× oversampled true-peak estimate.
+- **peak**: the sample peak and the true peak, the highest point between the samples as a converter plays them, measured exactly. Bright hats peak up to 1.5 dB above their samples.
 - **loudness**: the largest K-weighted 400 ms momentary loudness over every
   window position (ITU-R BS.1770), in LUFS, channels summed. Short sounds read
   low, because the window spreads their energy over 400 ms.

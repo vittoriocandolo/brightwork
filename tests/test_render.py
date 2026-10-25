@@ -9,10 +9,9 @@ import math
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from scipy.signal.windows import tukey
 
 from brightwork_synth import carrier, cli, render, spectrum, voice
-from brightwork_synth.loudness import momentary_max, true_peak
+from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import loads
 
 from .conftest import EXAMPLE, make, make_tone
@@ -40,6 +39,7 @@ FLOOR = 1e-7  # the absolute bound near silence
 MATCHED_DB = 0.01  # how close level matching brings a set's files
 DECORRELATED = 0.2  # a stereo pair's channels correlate less than this
 TOP_COMPRESSION = 2.0  # the closed hat's top sub-band plays its decay √2·√2 = 2 times faster
+TRUE_PEAK_DB = 1e-4  # how close the true peak comes to a sine's amplitude: the passband's flatness
 
 
 SILENT = {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf}
@@ -214,6 +214,7 @@ def test_domain_rule() -> None:
             kink,
             1.0,
             24000.0,
+            peak,
         )
 
     # A linear path with no kinks predicts nothing.
@@ -232,12 +233,42 @@ def test_domain_rule() -> None:
     assert render.allowed(0.0099) == FLOOR
 
 
-def test_true_peak_catches_intersample_peaks() -> None:
-    """Estimate the true peak of a sine whose peaks fall between samples, within 1%."""
-    n = np.arange(4800)
-    x = (0.5 * tukey(n.size, 0.2) * np.sin(2 * np.pi * 12000 / 48000 * n + np.pi / 4)).astype(np.float32)
-    assert np.max(np.abs(x)) == pytest.approx(0.5 * math.sqrt(0.5), rel=1e-6)
-    assert true_peak(x) == pytest.approx(0.5, rel=0.01)
+@pytest.mark.parametrize("base", [44100, 48000])
+def test_the_true_peak_is_read_between_the_samples_exactly(base: int) -> None:
+    """Measure a 19 kHz sine, whose peaks fall between the file's samples, and find its amplitude to 0.0001 dB."""
+    rate = render.K * base
+    n = np.arange(round(0.05 * rate))
+    amplitude = 0.7
+    sine = amplitude * np.sin(2 * math.pi * 19000 * n / rate + 0.3) * np.sin(math.pi * n / n.size) ** 2  # faded
+    peak = render.true_peak(sine, render.decimator(base).taps)
+    assert 20 * math.log10(peak / amplitude) == pytest.approx(0.0, abs=TRUE_PEAK_DB)
+    file = render.decimate(render.decimator(base).taps, sine, render.K)
+    assert np.max(np.abs(file)) < peak  # the file's samples miss the crest
+
+
+def test_a_render_reports_the_true_peak_of_its_files() -> None:
+    """Report each file's true peak at its gain: above its sample peak, and the same at both rates of a family."""
+    p = make(**{"noise[2].level_db": 0.0})
+    report = render.render(p)[1]
+    double = render.render(make(**{"noise[2].level_db": 0.0, "output.sample_rate": 96000}))[1]
+    f = report.files[0]
+    assert f.true_peak > f.peak
+    assert f.true_peak == pytest.approx(10 ** (-6 / 20) * render.synthesize(p).true_peak, rel=1e-6)
+    assert double.files[0].true_peak == pytest.approx(f.true_peak, rel=1e-6)
+    assert f"{20 * math.log10(f.true_peak):.2f} dBTP true" in str(report)
+
+
+@pytest.mark.parametrize(("db", "fmt"), [(-1.0, "float32"), (-0.1, "float32"), (0.0, "pcm16"), (0.0, "pcm24")])
+def test_true_peak_mode_reaches_its_target_within_the_pcm_ceiling(db: float, fmt: str) -> None:
+    """Normalize a set to its loudest true peak, and reach either the target or the format's ceiling, never beyond."""
+    p = make(**{"output.mode": "true-peak", "output.db": db, "output.format": fmt, "noise[2].level_db": 0.0})
+    _, report = render.render_takes(p, 3)
+    top = max(f.true_peak for f in report.files)
+    assert top <= 10 ** (db / 20) * (1 + 1e-6)
+    assert report.peak <= report.ceiling
+    hit_target = math.isclose(20 * math.log10(top), db, rel_tol=0, abs_tol=1e-4)
+    hit_ceiling = report.peak == pytest.approx(report.ceiling, rel=2**-24)
+    assert hit_target or hit_ceiling  # one of the two limits binds
 
 
 # One render knows the rule at every drive.
@@ -299,7 +330,19 @@ def test_drive_headroom_never_skips_an_outside_island() -> None:
     alpha = voice.drive_alpha(12.0)
 
     def at(a: float) -> render.Synthesis:
-        return render.Synthesis(np.array([1.0]), 1536000, 32, 1, voice.Slew(0.1, knees), kinks, 0.0, a, 24000.0, probes)
+        return render.Synthesis(
+            np.array([1.0]),
+            1536000,
+            32,
+            1,
+            voice.Slew(0.1, knees),
+            kinks,
+            0.0,
+            a,
+            24000.0,
+            1.0,
+            probes,
+        )
 
     threshold = math.pi**2 / math.log(render.SATURATION / render.LIMIT)
     island = threshold / 0.1

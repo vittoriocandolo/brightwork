@@ -44,6 +44,7 @@ SAMPLE_RATES = (44100, 48000, 88200, 96000)
 FORMATS = ("float32", "pcm24", "pcm16")
 WAVES = ("sine", "square")
 PHASES = ("strike", "free")
+MODES = ("gain", "peak", "true-peak")  # the output's: a gain, or a sample or true peak target at or below full scale
 MAX_MS = 8000.0  # every carrier repeats after 8 s
 MAX_NOISE = 4
 MAX_TONES = 2
@@ -446,8 +447,8 @@ def _validate_output(o: object, problems: _Problems) -> None:
         return
     problems.integer("output.sample_rate", o.sample_rate, SAMPLE_RATES)
     problems.choice("output.format", o.format, FORMATS)
-    mode = problems.choice("output.mode", o.mode, ("gain", "peak"))
-    problems.number("output.db", o.db, -60.0, 0.0 if mode == "peak" else 24.0)
+    mode = problems.choice("output.mode", o.mode, MODES)
+    problems.number("output.db", o.db, -60.0, 24.0 if mode == "gain" else 0.0)
     problems.integer("output.polarity", o.polarity, (1, -1))
 
 
@@ -768,7 +769,7 @@ def dumps(p: Patch) -> str:
         [
             ("sample_rate", str(o.sample_rate), ""),
             ("format", f'"{o.format}"', '"float32" | "pcm24" | "pcm16"'),
-            ("mode", f'"{o.mode}"', '"gain" | "peak"'),
+            ("mode", f'"{o.mode}"', '"gain" | "peak" | "true-peak"'),
             ("db", _f(o.db), "gain in dB, or peak target in dBFS"),
             ("polarity", str(o.polarity), ""),
         ],

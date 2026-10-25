@@ -51,6 +51,7 @@ from .render import (
     db,
     domain,
     output_stage,
+    set_gain,
     synthesize,
     take_numbers,
     write_file,
@@ -208,10 +209,10 @@ def check_outputs(patches: list[tuple[str, Patch]]) -> None:
             raise PackError(msg)
 
 
-def _synthesize(p: Patch) -> tuple[Floats, Domain]:
-    """Synthesize one take and judge its domain, in a worker."""
+def _synthesize(p: Patch) -> tuple[Floats, float, Domain]:
+    """Synthesize one take, with its true peak, and judge its domain, in a worker."""
     s = synthesize(p)
-    return s.out, domain(s)
+    return s.out, s.true_peak, domain(s)
 
 
 @dataclass(frozen=True)
@@ -318,11 +319,12 @@ class Kit:
 
 @dataclass(frozen=True)
 class Rendered:
-    """Every patch's files at unity gain: per patch, per file, the output, its takes, loudness and level match."""
+    """Every patch's files at unity gain: per patch, per file, the output, takes, peaks, loudness and level match."""
 
     raw: list[list[Floats]]  # a stereo pair stacked as (samples, 2)
     held: list[tuple[tuple[int, ...], ...]]  # the takes each file holds
     domains: list[tuple[Domain, ...]]  # per take
+    true_peaks: list[list[float]]  # per file, at unity gain
     loud: list[list[float]]  # LUFS
     gains: list[list[float]]  # from level matching, 1 without
 
@@ -369,17 +371,21 @@ def _render(every: list[tuple[str, Patch]], options: Options, workers: int | Non
     raw: list[list[Floats]] = []
     held: list[tuple[tuple[int, ...], ...]] = []
     doms: list[tuple[Domain, ...]] = []
+    true_peaks: list[list[float]] = []
     i = 0
     for ts in numbers:
-        files, which, ds = [], [], []
+        files, which, tps = [], [], []
+        ds: list[Domain] = []
         for j in range(0, len(ts), width):
-            outs = [done[i + j + c][0] for c in range(width)]
+            outs, peaks, takes = zip(*done[i + j : i + j + width], strict=True)
             files.append(np.stack(outs, axis=1) if options.stereo else outs[0])
             which.append(tuple(ts[j : j + width]))
-            ds += [done[i + j + c][1] for c in range(width)]
+            ds += takes
+            tps.append(max(peaks))
         raw.append(files)
         held.append(tuple(which))
         doms.append(tuple(ds))
+        true_peaks.append(tps)
         i += len(ts)
     rate = every[0][1].output.sample_rate
     loud = [[momentary_max(f, rate) for f in files] for files in raw]
@@ -388,20 +394,16 @@ def _render(every: list[tuple[str, Patch]], options: Options, workers: int | Non
         [(10.0 ** ((row[0] - x) / 20.0) if match and row[0] > -math.inf and x > -math.inf else 1.0) for x in row]
         for row in loud
     ]
-    return Rendered(raw, held, doms, loud, gains)
+    return Rendered(raw, held, doms, true_peaks, loud, gains)
 
 
 def _set_gain(first: Patch, r: Rendered) -> float:
-    """Return the gain every file shares: the output gain, or what brings the loudest file to the peak target."""
-    if first.output.mode == "gain":
-        return float(10.0 ** (first.output.db / 20.0))
-    peak = max(
-        float(np.max(np.abs(f), initial=0.0)) * g
-        for files, gs in zip(r.raw, r.gains, strict=True)
-        for f, g in zip(files, gs, strict=True)
-    )
-    target = min(10.0 ** (first.output.db / 20.0), ceiling(first.output.format))
-    return target / peak if peak > 0 else 1.0
+    """Return the gain every file shares, from every file's peaks after its level match."""
+    gained = [
+        (f, tp, g) for row in zip(r.raw, r.true_peaks, r.gains, strict=True) for f, tp, g in zip(*row, strict=True)
+    ]
+    peaks = [float(np.max(np.abs(f), initial=0.0)) * g for f, _, g in gained]
+    return set_gain(first.output, peaks, [tp * g for _, tp, g in gained])
 
 
 def _layers(group: Group, rows: range, r: Rendered, set_gain: float) -> tuple[list[Layer], list[tuple[Audio, ...]]]:
