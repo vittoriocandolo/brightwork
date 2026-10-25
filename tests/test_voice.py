@@ -336,6 +336,17 @@ def test_the_damper_multiplies_every_source_and_ends_the_sound() -> None:
     assert np.array_equal(xq[t < DAMPER_S], xp[: xq.size][t < DAMPER_S])
 
 
+def test_a_source_after_the_damper_never_sounds() -> None:
+    """Leave out a source that starts after the damper has ended, and its kinks with it."""
+    late = amp((2, 0), (2.03, 1), (2.13, 0.6), (3.5, 0.1), (7, 0))
+    damped = {"damper.amp": amp((1, 1), (1.5, 0)), "noise[2].amp": late}
+    with_late, without = make(**damped), make(**damped, **{"noise[2].level_db": -math.inf})
+    assert np.array_equal(internal_x(with_late), internal_x(without))
+    alone = make(**damped, **{"noise[1].level_db": -math.inf})
+    assert not np.any(internal_x(alone))
+    assert kinky_jumps(alone).t.size == 0
+
+
 def test_tables_depend_only_on_the_lines_and_the_layout() -> None:
     """Key tables by the lines and the layout alone, so shapes, levels and the output reuse every table."""
 
@@ -371,6 +382,27 @@ def test_source_length_and_sample_count() -> None:
     for ms in (120.0, 0.05, 1000.0 / 3):
         n = voice.sample_count(ms / 1000, RATE)
         assert (n - 1) / RATE <= ms / 1000 < n / RATE
+    # Times a float apart from a sample, on either side, where t·F rounds to the wrong count.
+    for t in (math.nextafter(5 / RATE, 0.0), 9.729645833333333):
+        rate = RATE if t < 1 else 3072000
+        n = voice.sample_count(t, rate)
+        assert (n - 1) / rate <= t < n / rate
+
+
+def test_a_sample_span_holds_exactly_the_samples_between_its_times() -> None:
+    """Hold every internal sample n with t0 ≤ n / F ≤ t1 within the render, decided in float64."""
+    count = 1000
+    edges = [math.nextafter(23 / RATE, side) for side in (0.0, math.inf)]
+    for t0 in (-1.0, 0.0, 23 / RATE, *edges):
+        for t1 in (-1.0, *edges, 300 / RATE, 2.0):
+            a, b = voice.sample_span(t0, t1, RATE, count)
+            inside = [n for n in range(count) if t0 <= n / RATE <= t1]
+            assert (a, b) == ((inside[0], inside[-1] + 1) if inside else (a, a))
+    # Late enough that t0·F rounds up past the first sample at or after t0.
+    t0 = 596.854
+    a, _ = voice.sample_span(t0, t0 + 1.0, RATE, 10**10)
+    assert (a - 1) / RATE < t0 <= a / RATE
+    assert a < math.ceil(t0 * RATE)
     v = voice.voice(make())
     assert v.t_src == LENGTH_S
 

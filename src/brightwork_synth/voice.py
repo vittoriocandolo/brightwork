@@ -240,7 +240,7 @@ def sample_count(t_src: float, rate: int) -> int:
     return n + 1
 
 
-def _span(t0: float, t1: float, rate: int, count: int) -> tuple[int, int]:
+def sample_span(t0: float, t1: float, rate: int, count: int) -> tuple[int, int]:
     """Return the internal samples n with t0 ≤ n / rate ≤ t1, within [0, count)."""
     a = max(0, math.ceil(t0 * rate))
     while a > 0 and (a - 1) / rate >= t0:
@@ -268,15 +268,13 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
     """
     v, ip, tabs = model
     x = np.zeros(count)
-    if not count:
-        return x
     workers = workers or os.cpu_count() or 1
     with carrier.single_threaded(), ThreadPoolExecutor(workers) as pool:
         for s in v.audible:
-            lo, hi = _span(s.start, s.end, rate, count)
+            lo, hi = sample_span(s.start, s.end, rate, count)
             if lo >= hi:
                 continue
-            spans = [_span(float(sb.env.t[0]), float(sb.env.t[-1]), rate, count) for sb in s.subbands]
+            spans = [sample_span(float(sb.env.t[0]), float(sb.env.t[-1]), rate, count) for sb in s.subbands]
 
             def run(
                 block: int,
@@ -437,11 +435,9 @@ def internal(
     rate: int,
     count: int,
     ip: carrier.Interpolator,
-    tabs: Tables | None = None,
+    tabs: Tables,
 ) -> tuple[Floats, Floats, Slew]:
     """Return (x, y, slew): the saturator's input and output at the internal samples 0 ≤ n < count."""
-    if tabs is None:
-        tabs = tables(v, ip.rate)
     x = synthesize_x(Model(v, ip, tabs), rate, count)
     return x, saturate(v.alpha, x), slew_of(x)
 
@@ -527,10 +523,8 @@ def _no_kinks() -> Kinks:
     return Kinks((), empty, empty, empty, empty, empty)
 
 
-def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables | None = None) -> Kinks:
+def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables) -> Kinks:
     """Return every term's jumps at every knot (plan §5): sub-band shapes, the chatter gate and the damper."""
-    if tabs is None:
-        tabs = tables(v, ip.rate)
     times = [sb.env.t for s in v.audible for sb in s.subbands]
     times += [s.shape.t for s in v.audible if s.chatter]
     if v.damper is not None:
