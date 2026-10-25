@@ -3,7 +3,9 @@
 
 """The patch: parsing, validation, canonical TOML, the valid domain and the editing commands (plan §4, §5)."""
 
+import copy
 import dataclasses
+import datetime as dt
 import math
 from collections.abc import Callable
 from typing import Any
@@ -14,11 +16,12 @@ import pytest
 from brightwork_synth import patch
 from brightwork_synth.patch import PatchError, dumps, from_dict, loads
 
-from .conftest import EXAMPLE, TONE, example, make, make_tone
+from .conftest import EXAMPLE, TONE, edit, example, make, make_tone
 
 LENGTH_MS = 120.0  # the example's length: its plates' last knot
 TICK_MS = 5.0  # its tick's
 SOMETIMES = 0.5  # how often a random patch has a damper
+HALF_MICROSECOND = 0.0005  # ms: half the step knot times are written to
 SHIFT = 0.002  # ms: how far composing two softer strikes may round a knot from one
 
 
@@ -432,6 +435,56 @@ def test_all_problems_are_reported_together() -> None:
     assert sorted(m.split(":")[0] for m in found) == ["noise[1].dampning", "noise[2].damping", "seed", "take"]
 
 
+def test_misshapen_tables(example_dict: dict[str, Any]) -> None:
+    """Name a section, an array of knots or a knot that is not the table it should be."""
+    assert problems(from_dict, ["not", "a", "table"]) == ["expected a table"]
+    cases = [
+        ("drive", 3, "drive: expected a table, found an integer"),
+        ("noise[1].amp", 3, "noise[1].amp: expected an array of { ms, gain } tables, found an integer"),
+        ("noise[1].amp[2]", 0.5, "noise[1].amp[2]: expected a { ms, gain } table, found a float"),
+        ("noise[1].amp[2]", {"ms": 0.3}, "noise[1].amp[2].gain: missing"),
+        ("noise[1].damping", dt.date(2026, 1, 1), "noise[1].damping: expected a number, found a date"),
+    ]
+    for path, value, problem in cases:
+        assert problem in problems(from_dict, edit(copy.deepcopy(example_dict), path, value))
+    tone = example(tone=True)
+    tone["tone"][0]["partials"] = [205.3]
+    assert "tone[1].partials[1]: expected a { hz, level_db } table, found a float" in problems(from_dict, tone)
+
+
+def test_an_unknown_field_beside_a_valid_patch(example_dict: dict[str, Any]) -> None:
+    """Refuse an unknown field even when every other part makes a valid patch."""
+    example_dict["colour"] = "red"
+    assert problems(from_dict, example_dict) == ["colour: unknown field"]
+
+
+def test_numbers_too_large_for_a_float() -> None:
+    """Name an integer too large for a float, from TOML or from code, rather than overflow."""
+    assert "drive.db: is too large" in problems(loads, EXAMPLE.replace("db = 0.0 ", f"db = {10**400} "))
+    p = loads(EXAMPLE)
+    assert problems(dataclasses.replace, p, drive=patch.Drive(10**400)) == ["drive.db: is too large"]
+
+
+def test_programmatic_parts_must_have_their_types() -> None:
+    """Name a part built in code with the wrong type: sources, sections, knots and partials."""
+    p = loads(EXAMPLE)
+    tone = loads(dumps(make_tone())).tone[0]
+    cases: list[tuple[dict[str, object], str]] = [
+        ({"noise": [p.noise[0]]}, "noise: expected noise sources"),
+        ({"tone": (p.noise[0],)}, "tone: expected tone sources"),
+        ({"damper": None}, "damper: expected a damper section"),
+        ({"drive": None}, "drive: expected a drive section"),
+        ({"output": None}, "output: expected an output section"),
+        ({"damper": patch.Damper([(0.0, 1.0)])}, "damper.amp: expected (ms, gain) knots"),  # type: ignore[arg-type]
+        (
+            {"tone": (dataclasses.replace(tone, partials=[(205.3, 0.0)]),)},  # type: ignore[arg-type]
+            "tone[1].partials: expected (hz, level_db) partials",
+        ),
+    ]
+    for edits, problem in cases:
+        assert problem in problems(dataclasses.replace, p, **edits)
+
+
 def test_toml_syntax_errors_are_patch_errors() -> None:
     """Report a TOML syntax error as a patch's problem."""
     assert problems(loads, 'instrument = "cymbal"\nschema = 1\n[drive\n')[0].startswith("TOML:")
@@ -583,3 +636,30 @@ def test_softer_applies_level_and_contact() -> None:
         assert x.level_db == y.level_db
         assert x.band_hz[1] == pytest.approx(y.band_hz[1], abs=0.11)
         assert all(abs(m - n) <= SHIFT for (m, _), (n, _) in zip(x.amp, y.amp, strict=True))
+
+
+def test_pitch_needs_a_finite_shift() -> None:
+    """Refuse a shift of infinite or undefined semitones."""
+    for text in ("inf", "-inf", "nan"):
+        assert problems(patch.pitch_ratio, loads(EXAMPLE), text) == [
+            f"pitch: expected a finite number of semitones, found {text!r}",
+        ]
+
+
+def test_stretching_a_named_empty_damper_changes_nothing() -> None:
+    """Leave a patch without a damper as it is when the damper is named."""
+    p = loads(EXAMPLE)
+    assert patch.stretch(p, "damper.amp", 2.0) == p
+
+
+def test_softer_lengthens_a_rise_of_several_knots_in_proportion() -> None:
+    """Keep the knots inside a rise at their place in it, the rise lengthened as a whole."""
+    p = make(**{"noise[1].amp": amp((0.0, 0.0), (0.1, 0.5), (0.4, 1.0), (8.0, 0.45), (120.0, 0.0))})
+    q = patch.softer(p, 12.0)
+    (start, _), (middle, _), (top, _) = q.noise[0].amp[:3]
+    assert start == 0.0
+    assert top == pytest.approx(0.4 * (10 ** (-12 / 20)) ** -0.2, abs=HALF_MICROSECOND)  # written to 1 µs
+    assert middle == pytest.approx(top / 4, abs=HALF_MICROSECOND)
+    for db in (math.inf, math.nan):
+        assert problems(patch.softer, p, db) == [f"DB: must be a finite number, found {db!r}"]
+    assert problems(patch.softer, p, 6.0, contact=math.nan) == ["--contact: must be a finite number, found nan"]

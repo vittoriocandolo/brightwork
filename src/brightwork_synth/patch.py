@@ -19,6 +19,7 @@ patch they print stays readable.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import math
 import re
 import tomllib
@@ -286,12 +287,23 @@ class _Problems(list[str]):
         return None if lo is None or hi is None else (lo, hi)
 
 
+_KINDS = {
+    bool: "a boolean",
+    int: "an integer",
+    float: "a float",
+    str: "a string",
+    dt.datetime: "a date-time",
+    dt.date: "a date",
+    dt.time: "a time",
+    list: "an array",
+    tuple: "an array",
+    dict: "a table",
+}
+
+
 def _kind(v: object) -> str:
     """Name the kind of a value as TOML would."""
-    return {bool: "a boolean", str: "a string", list: "an array", tuple: "an array", dict: "a table"}.get(
-        type(v),
-        type(v).__name__,
-    )
+    return _KINDS.get(type(v), type(v).__name__)
 
 
 def _validate(p: Patch, problems: _Problems) -> None:
@@ -911,19 +923,10 @@ def curve_names(p: Patch) -> tuple[str, ...]:
 
 
 def _get_curve(p: Patch, name: str) -> Knots:
-    """Return a curve's knots, by its name."""
+    """Return a curve's knots, by one of its curve names."""
     if name == "damper.amp":
         return p.damper.amp
-    return _source(p, name[: -len(".amp")]).amp
-
-
-def _source(p: Patch, name: str) -> Noise | Tone:
-    """Return a source by its path, such as "noise[1]"."""
-    for prefix, s in p.sources:
-        if prefix == name:
-            return s
-    names = ", ".join(prefix for prefix, _ in p.sources)
-    raise PatchError([f"{name}: not a source of this patch; it has {names}"])
+    return dict(p.sources)[name.removesuffix(".amp")].amp
 
 
 def _set_curves(p: Patch, curves: dict[str, Knots]) -> Patch:
