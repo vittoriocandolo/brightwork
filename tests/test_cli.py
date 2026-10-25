@@ -306,7 +306,7 @@ def test_audition_arguments(capsys: pytest.CaptureFixture[str], example: Path, m
         seen.update(rate=rate, channels=channels, block=fill(4800))
         return Stream()
 
-    monkeypatch.setattr(audition, "_sounddevice_stream", stream)
+    monkeypatch.setattr(audition, "device_stream", stream)
     other = example.with_name("open.toml")
     other.write_text(cli.reference_text("open"))
     args = ["audition", example, other, "--bpm", "120", "--every", "1/8", "--pattern", "1,1,2,0", "--choke", "2:1"]

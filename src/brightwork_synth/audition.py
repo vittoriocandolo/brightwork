@@ -346,13 +346,13 @@ class Hits:
         playing = []
         for v in self.voices:
             stop = v.end if v.choked is None else min(v.end, v.choked + self.fade_length)
+            # Every voice sounds in this block: it starts before the block ends, and stops after it begins.
             a, b = max(self.clock, v.start), min(end, stop)
-            if a < b:
-                part = v.buffer[a - v.start : b - v.start]
-                if v.choked is not None:
-                    gain = self.fade.on((np.arange(a, b) - v.choked) / self.rate).astype(np.float32)
-                    part = part * (gain if part.ndim == 1 else gain[:, None])
-                out[a - self.clock : b - self.clock] += part if part.ndim == STEREO else part[:, None]
+            part = v.buffer[a - v.start : b - v.start]
+            if v.choked is not None:
+                gain = self.fade.on((np.arange(a, b) - v.choked) / self.rate).astype(np.float32)
+                part = part * (gain if part.ndim == 1 else gain[:, None])
+            out[a - self.clock : b - self.clock] += part if part.ndim == STEREO else part[:, None]
             if stop > end:
                 playing.append(v)
         self.voices = playing
@@ -795,7 +795,7 @@ def audition(
         sys.stderr.write(f"{e}\n")
         return 1
     try:
-        stream = (stream_factory or _sounddevice_stream)(session.rate, session.hits.channels, session.hits.fill)
+        stream = (stream_factory or device_stream)(session.rate, session.hits.channels, session.hits.fill)
     except RuntimeError as e:
         sys.stderr.write(f"{e}\n")
         return 1
@@ -813,7 +813,7 @@ def audition(
             report.write(f"{revealed}\n")
 
 
-def _sounddevice_stream(rate: int, channels: int, fill: Fill) -> AbstractContextManager[object]:
+def device_stream(rate: int, channels: int, fill: Fill) -> AbstractContextManager[object]:
     """Open an output stream at exactly `rate` that plays what `fill` mixes, or say why the device cannot."""
     try:
         # Imported here: importing sounddevice starts PortAudio, which only audition needs.
