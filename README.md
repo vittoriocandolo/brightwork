@@ -20,6 +20,8 @@ brightwork pack 42=closed.toml 46=open.toml --choke 46:42 --takes 8 --out hats/
 - [docs/PLAN.md](docs/PLAN.md): the design and the reasoning behind it.
 - [docs/VALIDATION.md](docs/VALIDATION.md): the evidence, from the numerical criteria to the adversarial grid and the performance budget.
 - [docs/BENCHMARK.md](docs/BENCHMARK.md): the sample-replacement benchmark, a protocol to run by hand.
+- [CHANGELOG.md](CHANGELOG.md): what each version changed.
+- [CONTRIBUTING.md](CONTRIBUTING.md): setting up, the checks a change passes, and the rules it keeps.
 
 This is an independent codebase. It carries over the designs and findings of
 the Kick Synth and the Snare/Clap Synth, which live on their own branches,
