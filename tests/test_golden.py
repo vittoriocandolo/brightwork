@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Golden renders of five frozen patches (plan §6 stability, §10 regression contract).
+"""Golden renders of six frozen patches (plan §6 stability, §10 regression contract).
 
 Across machines and library versions the output agrees within floating-point
 rounding, so the comparison uses a tolerance rather than a hash (plan §6).

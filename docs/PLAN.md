@@ -503,7 +503,7 @@ It also rejects:
 
 It never clamps or repairs a patch. Its messages name fields by path, and paths count from 1 everywhere, in the report and the commands too: `noise[1].amp[3].ms`, `tone[1].partials[2].hz`.
 
-A two-source hat has 22 numeric fields and three curves, one of them the empty damper, against the snare's 26 fields and five curves. §8.4 tests that common edits stay short.
+A two-source hat has 26 numeric fields, four of them its sources' rattles, and three curves, one of them the empty damper, against the snare's 26 fields and five curves. §8.4 tests that common edits stay short.
 
 **Editing commands** rewrite points visibly and never add a parameter. Each prints a complete, canonical patch, so only canonical comments are kept. Sources and knots are numbered from 1, in patch order.
 
