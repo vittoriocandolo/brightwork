@@ -96,6 +96,7 @@ allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "′"]  # math nota
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # pytest checks with assert, and rewrites it so that it also runs under python -O
+"tests/test_sfz_player.py" = ["S603"]  # runs the SFZ players' own renderers, found on the PATH or named by the tester
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '(?m)^# Copyright \(C\) \d{4}(-\d{4})? .+\n# SPDX-License-Identifier: GPL-3\.0-or-later$'  # the copyright line, then the license identifier

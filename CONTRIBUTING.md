@@ -73,7 +73,8 @@ the offline renderer it drives liquidsfz with.
 - **NumPy, SciPy and threadpoolctl are the only dependencies,** and
   `sounddevice` only for audition.
 - **Every check stays on.** Fix what a linter finds instead of silencing it.
-  The one exception is `assert` in tests, which is how pytest checks.
+  The exceptions are `assert` in tests, which is how pytest checks, and the
+  kit test's calls of the SFZ players' renderers, which are programs it runs.
 
 ## Frozen filters
 
