@@ -189,9 +189,8 @@ def decimate(
         s, b = task
         first = (b * per - reach) * row + s * factor  # input index of the block's first row
         z = np.zeros((per + reach) * row)
-        a, e = max(first, 0), min(first + z.size, y.size)
-        if e > a:
-            z[a - first : e - first] = y[a:e]
+        a, e = max(first, 0), min(first + z.size, y.size)  # a block always reaches the render's last input
+        z[a - first : e - first] = y[a:e]
         w = (z.reshape(per + reach, row) @ g.T).reshape(per + reach, phases, reach + 1)
         out = w[reach : reach + per, :, 0].copy()
         for i in range(1, reach + 1):
@@ -271,9 +270,7 @@ def _loudest(mags: Floats, first: int, n: int, taken: list[int]) -> list[int]:
     picked: list[int] = []
     for i in np.argsort(mags)[::-1][:256]:
         m = first + int(i)
-        if mags[i] == 0 or len(picked) == n:
-            break
-        if all(abs(m - q) > 1 for q in taken + picked):
+        if mags[i] and len(picked) < n and all(abs(m - q) > 1 for q in taken + picked):
             picked.append(m)
     return picked
 
@@ -286,22 +283,16 @@ def _probes(x: Floats, factor: int, taps: Floats, out: Floats, slew: Slew) -> Pr
     # computed exactly from x (the decimator's delay at low frequencies is a few outputs).
     a_max = drive_alpha(DRIVE_MAX)
     for n, alpha in ((slew.crest, 0.0), (slew.steep, a_max)):
-        m0, m1 = max(0, n // factor - 8), min(out.size, n // factor + 24)
-        if m1 <= m0:
-            continue
+        m0, m1 = max(0, n // factor - 8), min(out.size, n // factor + 24)  # n lies inside the render
         n0 = max(0, m0 * factor - taps.size + 1) // factor * factor
         n1 = min(count, (m1 - 1) * factor + 1)
         xs = x[n0:n1]
         y = np.tanh(alpha * xs) / np.tanh(alpha) if alpha else xs
         near = upfirdn(taps, y, down=factor)[m0 - n0 // factor : m1 - n0 // factor]
         picked += _loudest(np.abs(near), m0, PROBES, picked)
-    # out[m] = Σ_n h[mK − n] · y[n] over the internal samples 0 ≤ n < count that the filter reaches.
-    spans = []
-    for m in picked:
-        top = m * factor
-        n0, n1 = max(0, top - taps.size + 1), min(top, count - 1) + 1
-        if n1 > n0:
-            spans.append((m, n0, n1))
+    # out[m] = Σ_n h[mK − n] · y[n] over the internal samples 0 ≤ n < count that the filter reaches; every output
+    # reaches at least one.
+    spans = [(m, max(0, m * factor - taps.size + 1), min(m * factor, count - 1) + 1) for m in picked]
     if not spans:
         return None
     merged: list[list[int]] = []
@@ -588,11 +579,9 @@ class Take:
     def detail(self, drive_db: float) -> str | None:
         """Describe what the prediction comes from, and what drive would change the status."""
         c, h, d = self.cause, self.headroom, self.domain
-        if c.dominant is None or not d.predicted:
+        if c.dominant is None or not d.predicted or h is None:  # no headroom: silent
             return None
         text = "mostly saturation" if c.dominant == "saturation" else f"mostly kinks, {c.where}"
-        if h is None:
-            return text
         if h.db == math.inf:
             return f"{text}; inside at every drive up to {DRIVE_MAX:g} dB"
         if h.db == -math.inf:

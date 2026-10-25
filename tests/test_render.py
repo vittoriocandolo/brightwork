@@ -8,6 +8,7 @@ import math
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from scipy.signal.windows import tukey
 
 from brightwork_synth import carrier, cli, render, spectrum, voice
@@ -481,3 +482,28 @@ def test_a_stereo_file_is_two_consecutive_takes() -> None:
     peaked, preport = render.render_takes(make_tone(**{"output.mode": "peak", "output.db": -1.0}), 2, stereo=True)
     assert 20 * math.log10(max(float(np.max(np.abs(a))) for a in peaked)) == pytest.approx(-1.0, abs=1e-6)
     assert preport.files[0].gain_db == preport.files[1].gain_db == 0.0
+
+
+def test_a_set_over_full_scale_is_reported() -> None:
+    """Report a gain-mode set over full scale, and what to lower, above its files."""
+    _, report = render.render_takes(make(**{"output.db": 12.0, "drive.db": 12.0}), 2)
+    assert report.over
+    text = str(report)
+    assert text.index("over full scale") < text.index("file 1")
+
+
+def test_a_render_never_returns_non_finite_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a render whose output stage yields a non-finite sample, rather than return it."""
+
+    def broken(out: render.Floats, gain: float, polarity: int) -> NDArray[np.float32]:
+        return np.full(out.shape, math.inf * gain * polarity, dtype=np.float32)
+
+    monkeypatch.setattr(render, "output_stage", broken)
+    with pytest.raises(render.RenderError, match="non-finite"):
+        render.render(make())
+
+
+def test_quantization_refuses_what_its_format_cannot_hold() -> None:
+    """Refuse audio at full scale, which the dither could carry past the largest PCM value."""
+    with pytest.raises(render.RenderError, match="does not fit 16-bit PCM"):
+        render.quantize(np.ones(64, dtype=np.float32), 16, 1, 1)
