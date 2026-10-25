@@ -31,6 +31,9 @@ patch of any exported file, take included.
 
 ## The references
 
+[The gallery](references.md) has every reference's sound, level over time,
+spectrum and drive headroom.
+
 | Reference | What it is | Try |
 |---|---|---|
 | `closed` | A closed hi-hat: modes 14 Hz apart over 6–16 kHz and a stick tick, 120 ms | `stretch`, the plates' band, the tick's level |
@@ -147,6 +150,8 @@ slapping (an open or half-open hat); at 4 kHz it becomes a roughness. It
 sounds through drive and the damper like the rest of the source.
 
 ### Rattle
+
+![The shaker's collisions under its shape](figures/rattle.svg)
 
 `grains_hz` above 0 turns a source into a rattle: it sounds only at a stream
 of collisions, as a shaker's beads or a tambourine's jingles, and what rings
@@ -359,6 +364,8 @@ render   178 ms
   device.
 
 ## Kits
+
+![Four layers of the closed hat by softer, on the square law](figures/kit.svg)
 
 `brightwork pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]`
 renders a multisampled kit. Each `KEY=` group is one articulation on one key;

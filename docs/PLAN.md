@@ -121,6 +121,8 @@ The symbols:
 
 Everything before the decimator is a pure function of time, with no state.
 
+![The signal flow, from a patch's sources to the file](figures/flow.svg)
+
 **Why a signal model.** Physical models of cymbals and hi-hats solve the nonlinear plate equations and reproduce the cascade itself (Bilbao; Ducceschi and Touzé; Sekiguchi and Samejima). They are the reference for what a cymbal does. But their sound depends on the grid they are solved on, they cost far more to run, and their controls are thickness, curvature and material rather than what a producer edits. This plan takes their findings as the laws its signal model obeys: a finite modal density, damping that rises with frequency, and a build-up after hard strikes. It then renders that model exactly.
 
 ### 2.1 Time
@@ -198,6 +200,8 @@ The dome's curvature raises the lowest modes, not the density above them. An aud
 
 **The strike varies, the cymbal stays.** Struck hard, the plate vibrates in its weakly nonlinear or chaotic regime (Chaigne, Touzé and Thomas); struck softly, it still never meets the stick twice on the same spot. Either way, each strike distributes its energy among the modes differently. The modes themselves are the cymbal's geometry. Each take therefore draws every mode's amplitude and phase anew and keeps every mode's frequency. A different seed is a different cymbal of the same design.
 
+![One mode in each 14 Hz cell, against continuous noise, in the closed hat's lines](figures/modes.svg)
+
 **One mode per cell.** Positions within cells are uniform, so spacings range from nearly 0 to twice the mean, and no gap is wider than two cells.
 
 **Short events vary most.** On the snare, snare-like hits varied by 0.05–0.2 dB between takes, and 12–30 ms snaps by 1.4–3.1 dB. A hat is short but wide: a closed hat over 6–16 kHz draws on some 700 modes at 14 Hz spacing, so its spread was estimated to be small. Measured, it is not: over takes 1–8 of seeds 1–4, the closed reference varies by 0.8–1.4 dB, the pedal by up to 1.9 dB and the analog hat by up to 1.5 dB. A short hit's loudness depends on the time–bandwidth product of its effective length, not on its number of modes: over its first ten milliseconds or so, 10 kHz of band gives about a hundred degrees of freedom, whether it is made of modes or of continuous noise (0.3–0.5 dB standard deviation either way, measured). Long sounds vary less: the open hat, crash and ride by 0.6–0.7 dB, the bell by 0.07 dB. Delivery keeps one gain per set, offers level matching, and the report flags these sets (§7.1).
@@ -220,6 +224,8 @@ $$c_j(t)=\gamma_j\sum_{i}a_i\sum_{n}\frac{\lvert H_j(nf_i)\rvert}{n}\,\sin\!\big
 **Analog metal.** The TR-808's hats and cymbal share six square oscillators between about 200 and 800 Hz, followed by filters, and the cymbal gives a brighter and a darker part separate envelopes (Werner, Abel and Smith; Reid). A tone with six square partials through a band is that source, and damping gives its bright part the shorter decay.
 
 ### 2.6 Damping and bloom
+
+![The crash's sub-band envelopes: the higher, the later the peak and the sooner the fall](figures/subbands.svg)
 
 Two facts of cymbal physics:
 
@@ -298,6 +304,8 @@ A harder strike also drives the plate further into its chaotic regime, and its s
 $$R_j(t)=a\sum_i \beta_j(t-t_i),\qquad a=\frac{1}{\sqrt{m(\lambda)}},\qquad m(\lambda)=\lambda\!\int\!\beta^2+\lambda^2\Big[\Big(\int\!\beta\Big)^2-\int(\beta\star\beta)(\tau)\,\mathrm{tri}(\lambda\tau)\,d\tau\Big]$$
 
 Shakers, tambourines, maracas and cabasas are struck by many small collisions rather than one strike: beads against a shell, jingles against each other and their frame. A source with `grains_hz` > 0 is multiplied by a stream of collisions R_j, as it is by its chatter gate, so what rings at each collision is the source itself: a band of noise for a shaker's shell, modes for jingles, partials for a head.
+
+![The shaker's collisions under its shape](figures/rattle.svg)
 
 - **One collision** β rises to 1 in 0.1 ms and falls through a knot every 10 dB to −60 dB at `grain_ms`, then to 0: a Hermite curve like every shape, so the collision rings as the source would after a tap.
 - **When.** Time from the trigger is cut into cells of 1/λ, λ = `grains_hz`, and each cell holds one candidate at a uniform place in it, drawn from the seed and the take (key `cymbal/grains/v1`), as each cell of a cymbal holds one mode (§2.4). The shape keeps a candidate with probability e_j(t_i): collisions crowd at the peak of a shake and thin out as it dies away, as beads collide less often as the energy they share falls. Sources with the same rate share their collisions, as a tambourine's jingles and head are struck by the same hand.
@@ -634,6 +642,8 @@ A file contains:
 ### 7.3 Kits
 
 `brightwork pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]` renders a multisampled kit:
+
+![Four layers of the closed hat by softer, on the square law](figures/kit.svg)
 
 - Each `KEY=` group is one articulation on one key. Its patches are velocity layers, loudest first, and each layer gets N takes.
 - All patches share their output settings. Within a key, measured loudness must fall from each layer to the next.

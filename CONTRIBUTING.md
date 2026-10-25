@@ -77,6 +77,22 @@ the offline renderer it drives liquidsfz with.
   The exceptions are `assert` in tests, which is how pytest checks, and the
   kit test's calls of the SFZ players' renderers, which are programs it runs.
 
+## Documentation
+
+The figures in `docs/figures`, the sounds in `docs/audio` and the gallery
+`docs/references.md` are generated from the code:
+
+```
+uv run python docs/build.py
+```
+
+Commit them with the change that alters them, and keep the documentation in
+`docs/` and the README true to the code. The tests check that every link in
+the documentation leads somewhere, that every figure and sound is shown, that
+every sound is its reference as it ships, that the gallery is current, and
+that the guide's example report is the closed hat's. On PyPI the README's
+links point into the repository at the release's tag (`hatch_build.py`).
+
 ## Frozen filters
 
 The decimators and interpolators ship as data in `src/brightwork_synth/data`,

@@ -230,6 +230,8 @@ drive.
 `tools/references.py` measures every reference over seeds 1–4 × takes 1–8 at
 its own output settings.
 
+![Every reference's drive headroom](figures/headroom.svg)
+
 | Reference | LUFS, seed 1 take 1 | Mean of 32 | Largest take spread | Largest peak | Inside | Smallest margin | Smallest drive headroom |
 |---|---|---|---|---|---|---|---|
 | closed | −32.8 | −32.5 | 1.40 dB | −5.64 dBFS | all | 26.5 dB | 24.3 dB |
