@@ -24,10 +24,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cymbal.cli import REFERENCES, reference_text  # noqa: E402
-from cymbal.loudness import momentary_max  # noqa: E402
-from cymbal.patch import loads  # noqa: E402
-from cymbal.render import cause_of, db, domain, drive_headroom, output_stage, render_takes, synthesize  # noqa: E402
+from brightwork_synth.cli import REFERENCES, reference_text  # noqa: E402
+from brightwork_synth.loudness import momentary_max  # noqa: E402
+from brightwork_synth.patch import loads  # noqa: E402
+from brightwork_synth.render import cause_of, db, domain, drive_headroom, output_stage, render_takes, synthesize  # noqa: E402
 
 
 def take_row(args) -> dict:

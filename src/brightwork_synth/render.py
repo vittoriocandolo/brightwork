@@ -98,7 +98,7 @@ class Decimator:
 
 
 def manifest() -> dict:
-    return json.loads(resources.files("cymbal").joinpath("data", "decimators.json").read_text())
+    return json.loads(resources.files("brightwork_synth").joinpath("data", "decimators.json").read_text())
 
 
 def load_taps(raw: bytes, entry: dict) -> np.ndarray:
@@ -112,9 +112,9 @@ def load_taps(raw: bytes, entry: dict) -> np.ndarray:
 
 @functools.cache
 def decimator(base: int, k: int = K) -> Decimator:
-    """A frozen decimator from cymbal/data, verified against its checksum."""
+    """A frozen decimator from brightwork_synth/data, verified against its checksum."""
     entry = manifest()["filters"][f"{base}x{k}"]
-    raw = resources.files("cymbal").joinpath("data", entry["file"]).read_bytes()
+    raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
     return Decimator(base, k, load_taps(raw, entry), entry["sha256"], entry["stopband_db"])
 
 
@@ -536,7 +536,7 @@ class Take:
             )
         return (
             f"OUTSIDE the validated domain by {-d.margin_db:.1f} dB (predicted aliasing {d.predicted_db:.0f} dB); "
-            "check it with `cymbal verify`"
+            "check it with `brightwork verify`"
         )
 
     def detail(self, drive_db: float) -> str | None:
@@ -891,7 +891,7 @@ def provenance(p: Patch, *, takes: tuple, files: int, set_gain_db: float, file_g
     rate, factor = rates(p.output.sample_rate, k)
     base = FAMILY[p.output.sample_rate]
     meta = {
-        "renderer": f"cymbal {__version__}",
+        "renderer": f"brightwork {__version__}",
         "seed": p.seed,
         "takes": list(takes),
         "files": files,
@@ -935,7 +935,7 @@ def write_file(
 ) -> None:
     """Write one file in the patch's format, with its root note, its patch text and provenance.
 
-    The patch text is the first take's: `cymbal extract` recovers exactly the
+    The patch text is the first take's: `brightwork extract` recovers exactly the
     patch that renders this file, or its left channel.
     """
     bits = FORMATS[p.output.format]

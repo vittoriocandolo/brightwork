@@ -11,9 +11,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cymbal import wav
-from cymbal.patch import loads
-from cymbal.render import render_takes
+from brightwork_synth import wav
+from brightwork_synth.patch import loads
+from brightwork_synth.render import render_takes
 
 GOLDEN = Path(__file__).parent / "golden"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))

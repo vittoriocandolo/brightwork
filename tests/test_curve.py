@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.interpolate import CubicHermiteSpline, PchipInterpolator
 
-from cymbal.curve import Curve, amplitude_curve, mapped, pchip_slopes, peak_index
+from brightwork_synth.curve import Curve, amplitude_curve, mapped, pchip_slopes, peak_index
 
 
 def random_knots(rng):

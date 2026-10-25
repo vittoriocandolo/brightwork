@@ -7,7 +7,7 @@ import pytest
 from conftest import make
 from scipy.signal import upfirdn
 
-from cymbal import render as R
+from brightwork_synth import render as R
 
 # (base, K, taps, length in ms, 99% of the energy within, in ms), as plan §3 records them for 32× and the grid's
 # 16× and 64× designs repeat.
@@ -66,7 +66,7 @@ def test_the_snare_designs_ship_unchanged():
 @pytest.mark.parametrize("base, k", [(44100, 32), (48000, 32), (48000, 16)])
 def test_checksum_is_enforced(base, k):
     entry = R.manifest()["filters"][f"{base}x{k}"]
-    raw = resources.files("cymbal").joinpath("data", entry["file"]).read_bytes()
+    raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == entry["sha256"]
     assert np.array_equal(R.load_taps(raw, entry), R.decimator(base, k).taps)
     tampered = bytearray(raw)

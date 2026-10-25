@@ -1,4 +1,4 @@
-"""Design the frozen interpolators (plan §3) and write them to cymbal/data.
+"""Design the frozen interpolators (plan §3) and write them to src/brightwork_synth/data.
 
 The renderer never designs its interpolators: it loads these coefficients and
 checks their SHA-256. Run this only to change the rendering policy.
@@ -26,11 +26,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cymbal import carrier, spectrum  # noqa: E402
+from brightwork_synth import carrier, spectrum  # noqa: E402
 
 BASES = (44100, 48000)
 SHIPPED_K = (16, 32, 64)
-DATA = Path(__file__).resolve().parent.parent / "cymbal" / "data"
+DATA = Path(__file__).resolve().parent.parent / "src" / "brightwork_synth" / "data"
 BANDS = ((20.0, 20000.0), (6000.0, 16000.0), (300.0, 18000.0))
 INSTANTS = 400
 

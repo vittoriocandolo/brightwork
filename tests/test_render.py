@@ -5,11 +5,11 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from cymbal import cli, spectrum
-from cymbal import render as R
-from cymbal import voice as V
-from cymbal.loudness import momentary_max
-from cymbal.patch import loads
+from brightwork_synth import cli, spectrum
+from brightwork_synth import render as R
+from brightwork_synth import voice as V
+from brightwork_synth.loudness import momentary_max
+from brightwork_synth.patch import loads
 
 
 def amp(*points):
@@ -63,7 +63,7 @@ def test_repeating_a_render_changes_nothing():
     p = make(tone=True, **{"drive.db": 18.0, "noise[1].chatter": 0.8})
     assert np.array_equal(R.render(p)[0], R.render(p)[0])
     carrier_cache_cleared = R.render(p)[0]
-    from cymbal import carrier
+    from brightwork_synth import carrier
 
     carrier.clear_cache()
     assert np.array_equal(R.render(p)[0], carrier_cache_cleared)
@@ -140,7 +140,7 @@ def test_report():
     assert "120.0 ms source, 121.9 ms exported (5851 samples at 48000 Hz, float32, mono), seed 1, take 1" in text
     assert "predicted aliasing" in text and "margin" in text and "render" in text
     far = R.render(make(**HOT))[1]
-    assert not far.inside and "OUTSIDE" in str(far) and "cymbal verify" in str(far)
+    assert not far.inside and "OUTSIDE" in str(far) and "brightwork verify" in str(far)
     # Output gain never moves the domain status: it is judged at unity gain.
     assert R.render(make(**{"output.db": -40.0}))[1].takes[0].domain == t.domain
     tone = str(R.render(make(tone=True))[1])
@@ -177,7 +177,7 @@ def test_domain_rule():
 def test_true_peak_catches_intersample_peaks():
     from scipy.signal.windows import tukey
 
-    from cymbal.loudness import true_peak
+    from brightwork_synth.loudness import true_peak
 
     n = np.arange(4800)
     x = (0.5 * tukey(n.size, 0.2) * np.sin(2 * np.pi * 12000 / 48000 * n + np.pi / 4)).astype(np.float32)

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from cymbal import spectrum as sp
+from brightwork_synth import spectrum as sp
 
 
 def test_the_grid_reaches_20_khz_in_eighths_of_a_hertz():

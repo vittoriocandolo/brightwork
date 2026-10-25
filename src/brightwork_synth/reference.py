@@ -1,4 +1,4 @@
-"""The reference method behind `cymbal verify` and the adversarial grid (plan §8.2).
+"""The reference method behind `brightwork verify` and the adversarial grid (plan §8.2).
 
 The shipping output is D(y_F), where y_F[n] = y(n / F) and D is the frozen
 decimator. The reference renders the same take at a reference rate R, removes

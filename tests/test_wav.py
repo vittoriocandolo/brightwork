@@ -10,9 +10,9 @@ import soundfile
 from conftest import EXAMPLE, make
 from scipy.io import wavfile
 
-from cymbal import __version__, spectrum, wav
-from cymbal import render as R
-from cymbal.patch import dumps, loads
+from brightwork_synth import __version__, spectrum, wav
+from brightwork_synth import render as R
+from brightwork_synth.patch import dumps, loads
 
 
 def walk(path):
@@ -111,7 +111,7 @@ def test_provenance(exported):
     meta = wav.read(path).meta
     p = make(tone=True)
     assert meta["patch"] == dumps(p) and loads(meta["patch"]) == p
-    assert meta["renderer"] == f"cymbal {__version__}"
+    assert meta["renderer"] == f"brightwork {__version__}"
     assert (meta["seed"], meta["takes"], meta["files"]) == (1, [1], 1)
     assert meta["set_gain_db"] == pytest.approx(-6.0) and meta["file_gain_db"] == 0.0
     assert meta["decimator"]["sha256"] == R.decimator(48000).sha256

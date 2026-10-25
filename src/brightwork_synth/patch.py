@@ -693,7 +693,7 @@ def _array(name, items, note) -> list[str]:
     return [_note(f"{name} = [", note), *body, "]"]
 
 
-# Pitch vocabulary shared by `cymbal pitch`, the report and the WAV root note.
+# Pitch vocabulary shared by `brightwork pitch`, the report and the WAV root note.
 
 _NOTES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 _LETTERS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}

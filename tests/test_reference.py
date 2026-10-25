@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from cymbal import carrier
-from cymbal import reference as REF
-from cymbal import voice as V
-from cymbal.patch import loads
-from cymbal.render import synthesize
+from brightwork_synth import carrier
+from brightwork_synth import reference as REF
+from brightwork_synth import voice as V
+from brightwork_synth.patch import loads
+from brightwork_synth.render import synthesize
 
 
 def amp(*pts):

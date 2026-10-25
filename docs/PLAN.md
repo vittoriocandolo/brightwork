@@ -1,4 +1,4 @@
-# Cymbal Synth — Design and Implementation Plan
+# Brightwork — Design and Implementation Plan
 
 *Revision 1. Follows the Kick Synth (plan revision 2), which was implemented, validated and approved by ear, and the Snare/Clap Synth (plan revision 4), which was implemented and validated by measurement and awaits its listening approval. This is an independent codebase on its own branch: it carries over their designs and findings, not their code.*
 
@@ -273,7 +273,7 @@ As in the snare. The decimated signal is scaled by the output gain (gain mode) o
 
 ### 2.11 Dynamics
 
-A patch is one hit at the strength it will be played hardest. `cymbal softer PATCH DB [--contact P]` derives a softer hit of the same cymbal and prints it like any other patch. With v = 10^(−DB/20), it applies two of the snare's rules:
+A patch is one hit at the strength it will be played hardest. `brightwork softer PATCH DB [--contact P]` derives a softer hit of the same cymbal and prints it like any other patch. With v = 10^(−DB/20), it applies two of the snare's rules:
 
 | Rule | Edit | Physics |
 |---|---|---|
@@ -372,7 +372,7 @@ The budget includes the report, which grows with length only through the knee re
 
 ## 4. Patch
 
-The patch is the complete, readable description of the sound. Every field is required and the renderer holds no defaults, so a future default can never change an old patch. The one exception is the source arrays, `[[noise]]` and `[[tone]]`, which may be absent, meaning none. `cymbal init` writes complete patches. The values below are illustrative, not voiced.
+The patch is the complete, readable description of the sound. Every field is required and the renderer holds no defaults, so a future default can never change an old patch. The one exception is the source arrays, `[[noise]]` and `[[tone]]`, which may be absent, meaning none. `brightwork init` writes complete patches. The values below are illustrative, not voiced.
 
 ```toml
 instrument = "cymbal"
@@ -470,10 +470,10 @@ A two-source hat has 22 numeric fields and three curves, one of them the empty d
 
 **Editing commands** rewrite points visibly and never add a parameter. Each prints a complete, canonical patch, so only canonical comments are kept. Sources and knots are numbered from 1, in patch order.
 
-- `cymbal pitch PATCH SEMITONES|NOTE` multiplies every frequency in the patch by one ratio: band edges, spacings, partials and chatter rates. Each mode keeps its place in its cell and its excitation, so the same cymbal is resized. Given a note such as D5, the ratio puts the lowest partial of `tone[1]` on it, and the command fails if there is no tone. Times are unchanged, unlike a sampler's repitch. The command fails, rather than clamping, when anything would leave the valid domain.
-- `cymbal stretch PATCH CURVE... FACTOR [--after MS]` rescales knot times after the peaks, as in the snare; on the damper, after `--after`. `all` names every shape and the damper.
-- `cymbal choke PATCH MS [--release MS]` replaces the damper: gain 1 at MS, knots every 10 dB evenly spaced over the release down to −60 dB, and 0 one step later. The release defaults to 40 ms, as in kits. It is the choked cymbal, grabbed by a hand, and the open hat closed by the foot.
-- `cymbal softer PATCH DB [--contact P]` prints the same cymbal struck DB softer (§2.11).
+- `brightwork pitch PATCH SEMITONES|NOTE` multiplies every frequency in the patch by one ratio: band edges, spacings, partials and chatter rates. Each mode keeps its place in its cell and its excitation, so the same cymbal is resized. Given a note such as D5, the ratio puts the lowest partial of `tone[1]` on it, and the command fails if there is no tone. Times are unchanged, unlike a sampler's repitch. The command fails, rather than clamping, when anything would leave the valid domain.
+- `brightwork stretch PATCH CURVE... FACTOR [--after MS]` rescales knot times after the peaks, as in the snare; on the damper, after `--after`. `all` names every shape and the damper.
+- `brightwork choke PATCH MS [--release MS]` replaces the damper: gain 1 at MS, knots every 10 dB evenly spaced over the release down to −60 dB, and 0 one step later. The release defaults to 40 ms, as in kits. It is the choked cymbal, grabbed by a hand, and the open hat closed by the foot.
+- `brightwork softer PATCH DB [--contact P]` prints the same cymbal struck DB softer (§2.11).
 
 ## 5. Domains
 
@@ -532,7 +532,7 @@ The rule is not monotone in drive, so the search visits every 0.5 dB and both si
 
 Once measured, the domain is also published as a rule of thumb. The prototype's figures at 32× are about 18 dB of noise level + drive for a hat band and 22 dB for 2–9 kHz, with ticks from 20 µs under full-scale bright noise; the grid gives the real figures.
 
-`cymbal verify` runs the reference comparison on any single patch or set of takes, so settings outside the declared domain can still be checked one by one.
+`brightwork verify` runs the reference comparison on any single patch or set of takes, so settings outside the declared domain can still be checked one by one.
 
 ## 6. Repeatability
 
@@ -599,11 +599,11 @@ A file contains:
 - a `smpl` chunk with the root note of `tone[1]`'s lowest partial, when that tone sounds; unpitched patches have none;
 - a private `cymb` chunk with the patch text and provenance: the seed, the take or takes, the take and set gains, the renderer version, and the decimator and interpolator checksums.
 
-`cymbal extract` recovers the exact patch; from a stereo file, the first take's.
+`brightwork extract` recovers the exact patch; from a stereo file, the first take's.
 
 ### 7.3 Kits
 
-`cymbal pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]` renders a multisampled kit:
+`brightwork pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]` renders a multisampled kit:
 
 - Each `KEY=` group is one articulation on one key. Its patches are velocity layers, loudest first, and each layer gets N takes.
 - All patches share their output settings. Within a key, measured loudness must fall from each layer to the next.
@@ -652,19 +652,19 @@ For cymbals:
 ### 7.6 Commands
 
 ```
-cymbal init closed > closed.toml
-cymbal audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav
-cymbal audition crash.toml --watch --bpm 120 --every 4/1 --with groove.wav --stereo
-cymbal audition closed.toml --watch --against favourite.wav --blind --takes 8
-cymbal render crash.toml --out crash.wav [--takes 8] [--stereo] [--level-match]
-cymbal verify crash.toml [--takes 8]
-cymbal extract crash.wav > crash.toml
-cymbal pitch crash.toml +2
-cymbal pitch bell.toml D5
-cymbal stretch crash.toml all 0.7
-cymbal choke crash.toml 450 --release 60 > crash-choked.toml
-cymbal softer closed.toml 12 > closed-12.toml
-cymbal pack 42=closed.toml,closed-8.toml,closed-16.toml 44=pedal.toml 46=open.toml,open-12.toml --choke 46:42,44 --takes 8 --out hats/
+brightwork init closed > closed.toml
+brightwork audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav
+brightwork audition crash.toml --watch --bpm 120 --every 4/1 --with groove.wav --stereo
+brightwork audition closed.toml --watch --against favourite.wav --blind --takes 8
+brightwork render crash.toml --out crash.wav [--takes 8] [--stereo] [--level-match]
+brightwork verify crash.toml [--takes 8]
+brightwork extract crash.wav > crash.toml
+brightwork pitch crash.toml +2
+brightwork pitch bell.toml D5
+brightwork stretch crash.toml all 0.7
+brightwork choke crash.toml 450 --release 60 > crash-choked.toml
+brightwork softer closed.toml 12 > closed-12.toml
+brightwork pack 42=closed.toml,closed-8.toml,closed-16.toml 44=pedal.toml 46=open.toml,open-12.toml --choke 46:42,44 --takes 8 --out hats/
 ```
 
 A typical session goes like this:

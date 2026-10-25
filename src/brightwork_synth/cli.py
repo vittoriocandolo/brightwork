@@ -1,4 +1,4 @@
-"""Command line (plan §7.6): cymbal init | render | verify | extract | audition | pack, and the editing commands
+"""Command line (plan §7.6): brightwork init | render | verify | extract | audition | pack, and the editing commands
 pitch | stretch | choke | softer, which print a complete, canonical patch."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ REFERENCES = ("closed", "open", "pedal", "crash", "ride", "bell", "analog")
 
 
 def reference_text(name: str) -> str:
-    return resources.files("cymbal").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
+    return resources.files("brightwork_synth").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
 
 
 def _read(path: str) -> str:
@@ -139,7 +139,7 @@ def cmd_extract(args) -> int:
     except (OSError, ValueError) as e:
         return _fail(f"{args.wav}: {e}")
     if wav.PRIVATE not in found:
-        return _fail(f"{args.wav}: no embedded cymbal patch")
+        return _fail(f"{args.wav}: no embedded Brightwork patch")
     sys.stdout.write(json.loads(found[wav.PRIVATE].decode("utf-8"))["patch"])
     return 0
 
@@ -234,7 +234,7 @@ def _group(text: str) -> tuple[int, tuple[str, ...]]:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="cymbal", description="A one-voice hi-hat and cymbal synthesizer.")
+    ap = argparse.ArgumentParser(prog="brightwork", description="A one-voice hi-hat and cymbal synthesizer.")
     sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init", help="print a complete starting patch")
@@ -330,7 +330,7 @@ def main(argv=None) -> int:
         return args.run(args)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
-    except BrokenPipeError:  # the reader went away, as `cymbal render … | head` does: the files are written
+    except BrokenPipeError:  # the reader went away, as `brightwork render … | head` does: the files are written
         sys.stderr.close()
         return 0
 

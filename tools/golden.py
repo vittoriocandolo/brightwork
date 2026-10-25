@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cymbal.patch import loads  # noqa: E402
-from cymbal.render import export, render_takes  # noqa: E402
+from brightwork_synth.patch import loads  # noqa: E402
+from brightwork_synth.render import export, render_takes  # noqa: E402
 
 GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "golden"
 SETS = {  # name: (files, stereo)

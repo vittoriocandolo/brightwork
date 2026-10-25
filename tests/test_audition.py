@@ -7,10 +7,10 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE
 
-from cymbal import audition as A
-from cymbal.loudness import momentary_max
-from cymbal.patch import choke_knots, loads
-from cymbal.render import quantize, render, render_takes
+from brightwork_synth import audition as A
+from brightwork_synth.loudness import momentary_max
+from brightwork_synth.patch import choke_knots, loads
+from brightwork_synth.render import quantize, render, render_takes
 
 RATE = 1000  # a toy rate keeps the hit arithmetic readable
 

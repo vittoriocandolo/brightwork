@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 grid = pytest.importorskip("grid")
 
-from cymbal.render import K, QUIET, SATURATION  # noqa: E402
+from brightwork_synth.render import K, QUIET, SATURATION  # noqa: E402
 
 FAMILIES = {
     "noise",

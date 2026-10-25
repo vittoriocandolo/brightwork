@@ -13,10 +13,10 @@ import numpy as np
 import pytest
 from conftest import edit as set_path
 
-from cymbal import patch as P
-from cymbal.cli import reference_text
-from cymbal.loudness import momentary_max
-from cymbal.render import render
+from brightwork_synth import patch as P
+from brightwork_synth.cli import reference_text
+from brightwork_synth.loudness import momentary_max
+from brightwork_synth.render import render
 
 RATE = 48000
 
@@ -115,8 +115,8 @@ def peak_hz(x, near, start_ms=5.0, length_ms=400.0):
 
 
 def test_the_references_are_matched_inside_and_combine_into_kits():
-    from cymbal.cli import REFERENCES
-    from cymbal.render import render_takes
+    from brightwork_synth.cli import REFERENCES
+    from brightwork_synth.render import render_takes
 
     loud = {}
     for name in REFERENCES:

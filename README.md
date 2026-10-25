@@ -1,4 +1,4 @@
-# Cymbal Synth
+# Brightwork
 
 A one-voice hi-hat and cymbal synthesizer, rendered offline to WAV. Every
 stage is a pure function of time, every render states whether it lies where
@@ -9,11 +9,11 @@ It renders one-shots, sets of round-robin takes, stereo pairs, and kits:
 articulations on keys with velocity layers and choke groups, mapped by SFZ.
 
 ```
-pip install -e .[audition,test]
-cymbal init closed > closed.toml
-cymbal audition closed.toml --watch --bpm 120 --every 1/8
-cymbal render closed.toml --out closed.wav --takes 8
-cymbal pack 42=closed.toml 46=open.toml --choke 46:42 --takes 8 --out hats/
+uv tool install ".[audition]"    # the brightwork command, with live audition
+brightwork init closed > closed.toml
+brightwork audition closed.toml --watch --bpm 120 --every 1/8
+brightwork render closed.toml --out closed.wav --takes 8
+brightwork pack 42=closed.toml 46=open.toml --choke 46:42 --takes 8 --out hats/
 ```
 
 - [docs/GUIDE.md](docs/GUIDE.md): the workflow, every control, recipes, kits and chokes, and reading the report.

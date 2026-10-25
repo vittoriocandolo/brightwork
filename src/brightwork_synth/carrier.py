@@ -117,7 +117,7 @@ def polyphase(taps: np.ndarray, q: int, up: int) -> np.ndarray:
 
 
 def manifest() -> dict:
-    return json.loads(resources.files("cymbal").joinpath("data", "interpolators.json").read_text())
+    return json.loads(resources.files("brightwork_synth").joinpath("data", "interpolators.json").read_text())
 
 
 @functools.cache
@@ -128,7 +128,7 @@ def interpolator(base: int, up: int) -> Interpolator:
         taps, q = design(base, up)
         taps.flags.writeable = False
         return Interpolator(base, up, q, taps, polyphase(taps, q, up), None)
-    raw = resources.files("cymbal").joinpath("data", entry["file"]).read_bytes()
+    raw = resources.files("brightwork_synth").joinpath("data", entry["file"]).read_bytes()
     if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
         raise RuntimeError(f"interpolator {base}x{2 * up} does not match its checksum")
     taps = np.frombuffer(raw, dtype="<f8").astype(float)

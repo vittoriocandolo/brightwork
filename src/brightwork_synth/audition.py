@@ -9,7 +9,7 @@ one, patches cycle hit by hit. Each patch's takes cycle over its own hits. A
 new buffer takes over at the next hit that plays its patch.
 
 A choke (`--choke A:B,…`) fades every hit of patch A still sounding when B
-plays, over the release, with the curve `cymbal choke` writes: 60 dB in six
+plays, over the release, with the curve `brightwork choke` writes: 60 dB in six
 even steps of 10 dB, then silence one step later. A kit asks its sampler for
 the same (off_mode=normal with ampeg_release), so a hi-hat pattern is heard
 as it will play; samplers' release curves differ in detail.

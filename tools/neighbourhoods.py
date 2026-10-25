@@ -31,9 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from grid import set_path  # noqa: E402
 
-from cymbal.cli import REFERENCES, reference_text  # noqa: E402
-from cymbal.patch import PatchError, from_dict, loads, stretch, to_dict  # noqa: E402
-from cymbal.render import domain, synthesize  # noqa: E402
+from brightwork_synth.cli import REFERENCES, reference_text  # noqa: E402
+from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict  # noqa: E402
+from brightwork_synth.render import domain, synthesize  # noqa: E402
 
 STEPS = {
     "damping": [i / 4 for i in range(13)],

@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 import soundfile
 
-from cymbal import cli, wav
-from cymbal import pack as K
-from cymbal.loudness import momentary_max
-from cymbal.patch import dumps, loads, softer
+from brightwork_synth import cli, wav
+from brightwork_synth import pack as K
+from brightwork_synth.loudness import momentary_max
+from brightwork_synth.patch import dumps, loads, softer
 
 
 def parse_sfz(text):

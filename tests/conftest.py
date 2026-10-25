@@ -120,7 +120,7 @@ def example(tone: bool = False) -> dict:
 
 def make(tone: bool = False, **edits):
     """The example patch with edits by path, e.g. make(**{"noise[1].chatter": 0.3}); tone=True adds the plan's tone."""
-    from cymbal.patch import from_dict
+    from brightwork_synth.patch import from_dict
 
     d = example(tone)
     for path, value in edits.items():

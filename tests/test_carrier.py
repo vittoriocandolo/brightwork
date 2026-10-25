@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from threadpoolctl import threadpool_limits
 
-from cymbal import carrier, spectrum
+from brightwork_synth import carrier, spectrum
 
 DATA = Path(carrier.__file__).parent / "data"
 

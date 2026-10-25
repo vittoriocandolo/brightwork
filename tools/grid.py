@@ -31,10 +31,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from cymbal import cli  # noqa: E402
-from cymbal import patch as P  # noqa: E402
-from cymbal.reference import CHECK, DEEP, REFERENCE, compare, reference  # noqa: E402
-from cymbal.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
+from brightwork_synth import cli  # noqa: E402
+from brightwork_synth import patch as P  # noqa: E402
+from brightwork_synth.reference import CHECK, DEEP, REFERENCE, compare, reference  # noqa: E402
+from brightwork_synth.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
 
 INF = math.inf
 FLOOR = 1e-7

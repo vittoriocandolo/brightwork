@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, TONE, example, make
 
-from cymbal import patch as P
-from cymbal.patch import PatchError, dumps, from_dict, loads
+from brightwork_synth import patch as P
+from brightwork_synth.patch import PatchError, dumps, from_dict, loads
 
 
 def problems(fn, *args, **kwargs):

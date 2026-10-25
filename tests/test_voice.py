@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from cymbal import carrier, spectrum
-from cymbal import voice as V
-from cymbal.curve import amplitude_curve, mapped
-from cymbal.patch import Noise, loads
+from brightwork_synth import carrier, spectrum
+from brightwork_synth import voice as V
+from brightwork_synth.curve import amplitude_curve, mapped
+from brightwork_synth.patch import Noise, loads
 
 BASE = 48000
 RATE = 32 * BASE  # 48 kHz at 32×

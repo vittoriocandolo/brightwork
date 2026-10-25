@@ -1,4 +1,4 @@
-"""Design the frozen decimators (plan §3) and write them to cymbal/data.
+"""Design the frozen decimators (plan §3) and write them to src/brightwork_synth/data.
 
 The renderer never designs filters: it loads these coefficients and checks
 their SHA-256. Run this only to change the rendering policy.
@@ -30,7 +30,7 @@ ATTENUATION_DB = 116.0
 N_FFT = 2**20
 BASES = (44100, 48000)
 SHIPPED_K = (16, 32, 64)
-DATA = Path(__file__).resolve().parent.parent / "cymbal" / "data"
+DATA = Path(__file__).resolve().parent.parent / "src" / "brightwork_synth" / "data"
 
 
 def design(base: int, K: int) -> np.ndarray:

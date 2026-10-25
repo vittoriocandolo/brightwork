@@ -38,8 +38,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grid  # noqa: E402
 
-from cymbal.patch import from_dict  # noqa: E402
-from cymbal.render import (  # noqa: E402
+from brightwork_synth.patch import from_dict  # noqa: E402
+from brightwork_synth.render import (  # noqa: E402
     DRIVE_MAX,
     FAMILY,
     HEADROOM_STEP_DB,
@@ -53,7 +53,7 @@ from cymbal.render import (  # noqa: E402
     rates,
     render,
 )
-from cymbal.voice import drive_alpha, kink_bound, kink_terms, sample_count, saturate, synthesize_x, tables, voice  # noqa: E402
+from brightwork_synth.voice import drive_alpha, kink_bound, kink_terms, sample_count, saturate, synthesize_x, tables, voice  # noqa: E402
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB
@@ -126,7 +126,7 @@ def run_one(args) -> dict:
         return fixture.inside(drive)
 
     if h is not None:
-        from cymbal.voice import slew_of
+        from brightwork_synth.voice import slew_of
 
         knees = slew_of(fixture.x).knees
         prev = d0

@@ -7,25 +7,25 @@ evidence are in [PLAN.md](PLAN.md) and [VALIDATION.md](VALIDATION.md).
 
 ## The workflow
 
-1. **Start from the nearest reference.** `cymbal init closed > closed.toml`.
+1. **Start from the nearest reference.** `brightwork init closed > closed.toml`.
    The references are `closed`, `open`, `pedal`, `crash`, `ride`, `bell` and
    `analog` (below).
 2. **Voice it in a pattern, over your loop.**
-   `cymbal audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav`
+   `brightwork audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav`
    plays three closed hits and an open one per half bar, the open hat choked
    by the next closed hit, over your groove, and re-renders whenever you save
    a file. Edits take over at the next hit.
 3. **Match it against the sample it should replace.**
-   `cymbal audition closed.toml --watch --against favourite.wav --blind --takes 8`
+   `brightwork audition closed.toml --watch --against favourite.wav --blind --takes 8`
    alternates your render with the sample, matched in loudness, in a random
    order that audition reveals when you stop it.
-4. **Derive articulations and layers.** `cymbal choke open.toml 250 > half.toml`
-   closes the open hat on a beat; `cymbal stretch closed.toml all 0.7` tightens
-   it; `cymbal softer closed.toml 8 > closed-8.toml` gives a softer layer.
+4. **Derive articulations and layers.** `brightwork choke open.toml 250 > half.toml`
+   closes the open hat on a beat; `brightwork stretch closed.toml all 0.7` tightens
+   it; `brightwork softer closed.toml 8 > closed-8.toml` gives a softer layer.
 5. **Pack the kit for the sampler.**
-   `cymbal pack 42=closed.toml,closed-8.toml 44=pedal.toml 46=open.toml --choke 46:42,44 --takes 8 --out hats/`.
+   `brightwork pack 42=closed.toml,closed-8.toml 44=pedal.toml 46=open.toml --choke 46:42,44 --takes 8 --out hats/`.
 
-Every file is exact and reproducible: `cymbal extract` gives back the exact
+Every file is exact and reproducible: `brightwork extract` gives back the exact
 patch of any exported file, take included.
 
 ## The references
@@ -144,7 +144,7 @@ sounds through drive and the damper like the rest of the source.
 `damper.amp` multiplies every source: 1 until damped, then down to 0 at its
 last knot, where the sound ends. Empty (`amp = []`) means never damped. It is
 a hand on a crash, a foot closing a hat, or with a slow fall from 0 ms a
-cymbal pressed into a shorter ring. `cymbal choke` writes one for you.
+cymbal pressed into a shorter ring. `brightwork choke` writes one for you.
 
 ### Drive
 
@@ -172,7 +172,7 @@ PCM render must peak 2 LSB below full scale so the dither never clips.
 `seed` is the cymbal: where its modes lie. A different seed is a different
 cymbal of the same design. `take` is the strike: each take draws every mode's
 amplitude and phase anew and keeps every mode's frequency, so takes are the
-same cymbal struck again. `cymbal render … --takes 8` writes takes take,
+same cymbal struck again. `brightwork render … --takes 8` writes takes take,
 take + 1, … as `closed_rr1.wav` … `closed_rr8.wav`; struck tones are the same
 in every take.
 
@@ -194,20 +194,20 @@ Each prints a complete patch; redirect it to a file. They rewrite points and
 never add parameters, so you can always keep editing the result by hand. They
 fail, and say why, rather than clamp.
 
-- **`cymbal pitch PATCH SEMITONES|NOTE`** multiplies every frequency by one
+- **`brightwork pitch PATCH SEMITONES|NOTE`** multiplies every frequency by one
   ratio: band edges, spacings, partials and chatter rates. Each mode keeps its
   place in its cell and its excitation, so it is the same cymbal, resized.
   Times are unchanged, unlike a sampler's repitch. A note, such as D5, puts
   `tone[1]`'s lowest partial on it. A band edge at 20 kHz cannot go up, nor one
   at 20 Hz down, so leave room where you will pitch.
-- **`cymbal stretch PATCH CURVE... FACTOR [--after MS]`** rescales knot times
+- **`brightwork stretch PATCH CURVE... FACTOR [--after MS]`** rescales knot times
   after each shape's peak, or after `--after`; on the damper, from 0 ms. `all`
-  names every shape and the damper, so `cymbal stretch crash.toml all 0.7`
+  names every shape and the damper, so `brightwork stretch crash.toml all 0.7`
   shortens a whole cymbal.
-- **`cymbal choke PATCH MS [--release MS]`** replaces the damper: gain 1 at
+- **`brightwork choke PATCH MS [--release MS]`** replaces the damper: gain 1 at
   MS, knots every 10 dB over the release down to −60 dB, and 0 one step later.
   The release defaults to 40 ms, as in kits.
-- **`cymbal softer PATCH DB [--contact P]`** gives the same cymbal struck DB
+- **`brightwork softer PATCH DB [--contact P]`** gives the same cymbal struck DB
   softer, by two rules from the physics of a strike:
   - every source level falls by DB, before the drive, so a softer hit is also
     cleaner;
@@ -225,23 +225,23 @@ command; the test suite checks that each moves the sound the right way.
 
 | To | Edit |
 |---|---|
-| Tighten or loosen a closed hat | `cymbal stretch closed.toml all 0.6` (or 1.6) |
+| Tighten or loosen a closed hat | `brightwork stretch closed.toml all 0.6` (or 1.6) |
 | Darken or brighten a hat | lower or raise the plates' `band_hz`, and the tick's upper edge |
 | Add stick | raise the tick source's `level_db` by 6 dB: it reaches lower than the plates |
-| A ghost note | `cymbal softer closed.toml 18` |
-| Shorten an open hat | `cymbal stretch open.toml all 0.6` |
+| A ghost note | `brightwork softer closed.toml 18` |
+| Shorten an open hat | `brightwork stretch open.toml all 0.6` |
 | Half-open it | raise `noise[1].chatter` to 0.6, and give it a damper that falls from 1 at 0 ms to 0 at 700 ms |
-| Close it on a beat | `cymbal choke open.toml 250` |
-| Lengthen or choke a crash | `cymbal stretch crash.toml all 1.5`; `cymbal choke crash.toml 450` |
+| Close it on a beat | `brightwork choke open.toml 250` |
+| Lengthen or choke a crash | `brightwork stretch crash.toml all 1.5`; `brightwork choke crash.toml 450` |
 | Darken a crash's tail | raise `noise[1].damping` |
 | More bloom | raise `noise[1].bloom` |
 | A splash | raise the crash's band (`noise[1].band_hz` from 1.2 kHz) and add a damper from 1 at 200 ms to 0 at 1.2 s |
 | A china | a lower band (`[400, 9000]`), `chatter` 0.7 at its 220 Hz, and a damper from 1 at 150 ms to 0 at 1.5 s |
 | Add ping or wash to a ride | raise the ping source (`noise[2]`) or the wash (`noise[1]`) by 6 dB |
-| Retune a bell | `cymbal pitch bell.toml D5` |
-| Open the analog hat | `cymbal stretch analog.toml all 8` |
+| Retune a bell | `brightwork pitch bell.toml D5` |
+| Open the analog hat | `brightwork stretch analog.toml all 8` |
 | The analog cymbal | `tone[1].band_hz` to `[3500, 18000]` and the shape's last two knots to 300 and 1200 ms |
-| Retune the analog hat | `cymbal pitch analog.toml +3` |
+| Retune the analog hat | `brightwork pitch analog.toml +3` |
 
 A darker band alone can lengthen a cymbal's measured decay, because what
 remains is its slow low end; the damper shortens the whole ring at once.
@@ -275,7 +275,7 @@ render   178 ms
   to the peak. Inside means at most −100 dB: the adversarial grid has
   demonstrated that every render it calls inside measures below −100 dB
   (VALIDATION.md). Outside, the render is still defined and exact, but
-  unvalidated; `cymbal verify` measures its actual error against a reference
+  unvalidated; `brightwork verify` measures its actual error against a reference
   render.
 - **The line under it** says what dominates the prediction:
   - *mostly kinks, 52% at noise[2].amp[2] (0.03 ms)*: a fast segment around
@@ -293,7 +293,7 @@ render   178 ms
 
 ## Audition
 
-`cymbal audition PATCH... [--watch] [--bpm BPM] [--every NOTE] [--pattern N,…] [--choke A:B,…] [--release MS] [--with BED] [--against SAMPLE] [--blind] [--takes N] [--stereo]`
+`brightwork audition PATCH... [--watch] [--bpm BPM] [--every NOTE] [--pattern N,…] [--choke A:B,…] [--release MS] [--with BED] [--against SAMPLE] [--blind] [--takes N] [--stereo]`
 
 - It plays exactly the buffer `render` writes; PCM formats add only their
   quantization. It opens the device at the patch's sample rate and never
@@ -310,7 +310,7 @@ render   178 ms
   takes cycle over its own hits.
 - `--choke 2:1` makes patch 2 choked by patch 1: a hit of patch 1 fades every
   patch-2 hit still sounding over `--release` ms (default 40), with the curve
-  `cymbal choke` writes, as a kit asks its sampler to.
+  `brightwork choke` writes, as a kit asks its sampler to.
 - `--with BED` loops a bed under the hits. It must be at the patch's rate and
   within 1 ms of a whole number of bars; it restarts on the tempo grid, so it
   never drifts. A stereo bed opens a stereo stream with mono hits in the
@@ -326,7 +326,7 @@ render   178 ms
 
 ## Kits
 
-`cymbal pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]`
+`brightwork pack KEY=PATCH[,PATCH…]… --out DIR [--takes N] [--stereo] [--level-match] [--choke KEY:KEY,…]… [--release MS]`
 renders a multisampled kit. Each `KEY=` group is one articulation on one key;
 its patches are velocity layers, loudest first, each with N takes (file j of a
 layer plays its patch's take + j − 1, or with `--stereo` a pair).

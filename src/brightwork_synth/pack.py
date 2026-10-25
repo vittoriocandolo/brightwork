@@ -188,7 +188,7 @@ class Kit:
         lines = [
             f"// {self.stem}: {len(self.keys)} key{'s' if len(self.keys) > 1 else ''}, {layers} velocity "
             f"layer{'s' if layers > 1 else ''} × {self.files_per_layer} take{'s' if self.files_per_layer > 1 else ''}"
-            f"{' (stereo pairs)' if self.stereo else ''}, written by cymbal {__version__}",
+            f"{' (stereo pairs)' if self.stereo else ''}, written by brightwork {__version__}",
             "// Velocity follows a square law, 40·log10(v/127) dB, across layer boundaries.",
             "",
             "<global>",
@@ -244,7 +244,7 @@ class Kit:
                     f"inside, worst margin {worst:.1f} dB"
                     if inside
                     else f"{sum(not d.inside for d in layer.domains)} take(s) OUTSIDE the validated domain; "
-                    "check with `cymbal verify`"
+                    "check with `brightwork verify`"
                 )
                 spread = f", take spread {layer.spread:.2f} dB" + (
                     " (over 1 dB: consider --level-match)" if layer.spread > 1.0 and not self.level_match else ""
@@ -446,7 +446,7 @@ def pack(
     release_ms: float = DEFAULT_RELEASE_MS,
     out=None,
 ) -> int:
-    """`cymbal pack`: render the keys, layers and takes, and write the files and the SFZ mapping."""
+    """`brightwork pack`: render the keys, layers and takes, and write the files and the SFZ mapping."""
     out = out or sys.stdout
     loaded = []
     for key, paths in groups:

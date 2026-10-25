@@ -5,9 +5,9 @@ import pytest
 import soundfile
 from conftest import EXAMPLE
 
-from cymbal import cli, wav
-from cymbal.patch import dumps, loads
-from cymbal.render import render, render_takes
+from brightwork_synth import cli, wav
+from brightwork_synth.patch import dumps, loads
+from brightwork_synth.render import render, render_takes
 
 
 def run(capsys, *args):
@@ -111,7 +111,7 @@ def test_errors_are_reported(capsys, tmp_path):
     other = tmp_path / "plain.wav"
     soundfile.write(other, np.zeros(10), 48000)
     code, _, err = run(capsys, "extract", other)
-    assert code == 2 and "no embedded cymbal patch" in err
+    assert code == 2 and "no embedded Brightwork patch" in err
     code, _, err = run(capsys, "extract", tmp_path / "nothing.wav")
     assert code == 2 and "nothing.wav" in err
 
@@ -201,7 +201,7 @@ def test_verify(capsys, example):
 
 
 def test_audition_arguments(capsys, example, monkeypatch):
-    from cymbal import audition as A
+    from brightwork_synth import audition as A
 
     seen = {}
 

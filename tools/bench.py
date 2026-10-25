@@ -1,6 +1,6 @@
 """Performance check (plan §3, §8.1): render time and memory on this machine.
 
-Each case runs in a fresh interpreter after numpy, scipy and cymbal are
+Each case runs in a fresh interpreter after numpy, scipy and brightwork_synth are
 imported and a first render has paid the libraries' first-use costs, so
 memory is measured above that baseline. Every timed render uses a take not
 rendered before, so it computes its tables, as every new take does; a repeat
@@ -19,9 +19,9 @@ import sys
 
 HIT = r"""
 import dataclasses, json, resource, time
-from cymbal import cli
-from cymbal.patch import loads, stretch, Noise
-from cymbal.render import decimator, render
+from brightwork_synth import cli
+from brightwork_synth.patch import loads, stretch, Noise
+from brightwork_synth.render import decimator, render
 p = loads(cli.reference_text(%(name)r).replace("sample_rate = 48000", "sample_rate = %(rate)d"))
 if %(third)d:  # a third source: a dark wash under the crash
     wash = Noise(-12.0, (300.0, 6000.0), 0.0, 0.3, 1.0, 0.0, 220.0,
@@ -44,10 +44,10 @@ print(json.dumps({"fresh": fresh, "cached": cached, "mib": (peak - base) / 1024,
 
 KIT = r"""
 import json, resource, time
-from cymbal import cli
-from cymbal.patch import loads, softer
-from cymbal.pack import build
-from cymbal.render import decimator
+from brightwork_synth import cli
+from brightwork_synth.patch import loads, softer
+from brightwork_synth.pack import build
+from brightwork_synth.render import decimator
 decimator(48000)
 groups = [(key, [(f"{name}{db}", softer(loads(cli.reference_text(name)), db)) for db in (0, 8, 16, 24)])
           for key, name in ((42, "closed"), (44, "pedal"), (46, "open"))]
