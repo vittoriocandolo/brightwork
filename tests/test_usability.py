@@ -421,3 +421,52 @@ def test_thin_the_tambourine_shiver() -> None:
     p = ref("tambourine")
     thinner = edit(p, **{"noise[2].grains_hz": 120.0, "noise[2].grain_ms": 15.0})
     assert granularity(thinner, 30, 200) > 1.2 * granularity(p, 30, 200)
+
+
+# From the off-beat open hat.
+
+
+def test_shorten_the_offbeat_hat_for_a_faster_tempo_and_close_it() -> None:
+    """Shorten the off-beat hat with one command, and close it on the next 16th at 138 bpm with another."""
+    p = ref("offbeat")
+    x = audio(p)
+    assert decay_ms(audio(patch.stretch(p, "all", 0.7))) < 0.85 * decay_ms(x)  # one command
+    assert decay_ms(audio(patch.choke(p, 109.0, release=20.0))) < 0.5 * decay_ms(x)  # one command
+
+
+# From the tight hat.
+
+
+def test_loosen_and_brighten_the_tight_hat() -> None:
+    """Loosen the tight hat with one command, and brighten it toward the closed hat with one field."""
+    p = ref("tight")
+    x = audio(p)
+    assert decay_ms(audio(patch.stretch(p, "all", 1.8))) > 1.25 * decay_ms(x)  # one command
+    brighter = edit(p, **{"noise[1].band_hz": [7000.0, 17000.0]})  # one field
+    assert centroid(audio(brighter)) > 1.05 * centroid(x)
+
+
+# From the dead hat.
+
+
+def test_open_up_the_dead_hat() -> None:
+    """Take the towel off the dead hat with one field: brighter, and longer."""
+    p = ref("dead")
+    x = audio(p)
+    open_up = audio(edit(p, **{"noise[1].damping": 0.5}))  # one field
+    assert centroid(open_up) > 1.1 * centroid(x)
+    assert decay_ms(open_up) > decay_ms(x)
+
+
+# From the wash.
+
+
+def test_take_the_swell_out_of_the_wash_and_brighten_it() -> None:
+    """Take the swell out of the wash with one field, and brighten it with one."""
+    p = ref("wash")
+    x = audio(p)
+    still = audio(edit(p, **{"noise[1].bloom": 0.0}))  # one field: the highs no longer rise after the strike
+    early, late = band_energy(x, 8000, 14000, 0, 4), band_energy(x, 8000, 14000, 40, 120)
+    assert band_energy(still, 8000, 14000, 0, 4) / band_energy(still, 8000, 14000, 40, 120) > 1.5 * early / late
+    brighter = edit(p, **{"noise[1].band_hz": [400.0, 18000.0]})  # one field
+    assert centroid(audio(brighter), 0, 500) > 1.05 * centroid(x, 0, 500)

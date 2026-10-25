@@ -1,6 +1,6 @@
 # The sample-replacement benchmark (plan §8.5)
 
-This is where "no more cymbal or hi-hat samples" becomes a measurement. It
+This is where "no more cymbal, hi-hat or shaker samples" becomes a measurement. It
 needs your own samples and your ears, so it is a protocol to run by hand.
 
 ## Result
@@ -9,10 +9,10 @@ Not yet run.
 
 ## Protocol
 
-1. **Collect.** Gather the 20–30 hi-hat and cymbal samples you actually use
-   that fall inside the family: closed, open, half-open and pedal hi-hats;
-   crashes, splashes and chinas; rides and ride bells; and drum-machine hats
-   and cymbals. Keep their articulations and velocity layers where they have
+1. **Collect.** Gather the 20–30 hi-hat, cymbal and top samples you actually
+   use that fall inside the family: closed, open, half-open and pedal hi-hats;
+   crashes, splashes and chinas; rides and ride bells; drum-machine hats and
+   cymbals; and shakers, tambourines, maracas and cabasas. Keep their articulations and velocity layers where they have
    them. Gongs, tam-tams, bells and cowbells, rolls, swells, bowing and
    brushes, rivet and sizzle cymbals, and sounds defined by processing or
    storage (rooms, filtering after the fact, the 6-bit cymbals of a TR-909)
@@ -41,9 +41,10 @@ The claim holds for the fraction that passes.
 
 ## Pre-registered additions
 
-Nine additions are pre-registered. Add one only if it fixes recorded failures:
+Impulsive sizzle with a density control, for rivets and loose hats, was
+pre-registered here; rattles now provide it. Eight additions are
+pre-registered. Add one only if it fixes recorded failures:
 
-- impulsive sizzle with a density control, for rivets and loose hats;
 - chatter at a jittered rate, if the periodic gate buzzes;
 - a cascade rule in `softer`, if softer hits need to bloom less and reach less high than contact alone gives;
 - take variation that keeps part of each mode's amplitude, if takes of one cymbal sound like different cymbals;

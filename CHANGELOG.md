@@ -35,9 +35,11 @@ The first public release.
   rule.
 - Frozen minimum-phase decimators and linear-phase interpolators for the
   44.1 and 48 kHz families, verified by checksum.
-- Nine references to start from: `closed`, `open`, `pedal`, `crash`, `ride`,
-  `bell`, `analog`, `shaker` and `tambourine`, matched in loudness and sharing
-  one output setting.
+- Thirteen references to start from, matched in loudness and sharing one
+  output setting: `closed`, `open`, `pedal`, `crash`, `ride`, `bell`,
+  `analog`, `shaker` and `tambourine`, and four voiced for trance, tech house
+  and the two ends of the axis from machine to band: `offbeat`, `tight`,
+  `dead` and `wash`.
 - Patches in TOML, read as UTF-8 or UTF-16, with every field required, every
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `pitch` by semitones or to a

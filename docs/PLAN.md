@@ -63,7 +63,7 @@ On the goal of never needing another cymbal or hi-hat sample: no plan can guaran
 | Packs on one key | Kits: several keys, each with velocity layers and takes, and choke groups | A hi-hat is several articulations of one instrument |
 | Mono | Mono, or two takes as a stereo pair | Cymbals are usually recorded and used in stereo |
 | Audition on the backbeat | Also on subdivisions, in patterns and with chokes | Hats are judged in patterns |
-| Six references | Nine | The family is wider, and reaches the tops |
+| Six references | Thirteen | The family is wider, reaches the tops, and is voiced along the vision |
 
 ---
 
@@ -73,7 +73,7 @@ The instrument has one voice. Up to four noise sources and two tones are summed 
 
 It is built for producers and sound designers who program hi-hats, cymbals and the tops of a groove in a DAW or a sampler: first the producers of house, tech house and trance, whose kick leads the mix and whose tops carry its groove, and from there along one axis, from the programmed machine to the played band. It renders one-shots, sets of round-robin takes, and kits: articulations on several keys, each with velocity layers, and choke groups that a sampler plays.
 
-Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. With rattles (§2.12) it reaches the tops beside them: shakers, tambourines, maracas and cabasas. Nine reference patches define acceptance:
+Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. With rattles (§2.12) it reaches the tops beside them: shakers, tambourines, maracas and cabasas. Thirteen reference patches define acceptance:
 
 - **Closed:** tight, bright plates with a stick tick.
 - **Open:** plates that ring and sizzle.
@@ -84,6 +84,13 @@ Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal
 - **Analog:** six square oscillators through a band; a drum machine's closed hat.
 - **Shaker:** one stroke of a shaker: fine grains rattling against the shell, larger beads clicking over them.
 - **Tambourine:** a hand on a headless tambourine: the jingles ring from the strike, then shiver as they rattle down.
+
+Four more are voiced for the producers the plan serves first, and for the two ends of the axis from the programmed machine to the played band:
+
+- **Off-beat:** trance's off-beat open hat: airy and brighter than the open hat, ringing about half a second, the plates slapping lightly.
+- **Tight:** tech house's closed hat: shorter and a little darker than the closed reference.
+- **Dead:** the played end's damped hat, as with a towel over the plates: dark, its highs gone at once.
+- **Wash:** the shoegaze end's ride, washed with a soft mallet: the highs swell after the strike and ring for seconds.
 
 These are starting patches. Their names never select hidden algorithms.
 
@@ -842,7 +849,7 @@ It installs with pip as one package with a `cymbal` command, and its tests run o
 | `wav.py` | RIFF writing and reading, float and PCM, mono and stereo |
 | `audition.py` | Tempo, subdivisions and patterns, chokes, beds, A/B and blind order, watching, takes, stereo, playback |
 | `cli.py` | Commands |
-| `data/` | Frozen decimators and interpolators with checksums, the nine references |
+| `data/` | Frozen decimators and interpolators with checksums, the thirteen references |
 | `tools/` | `design_decimator.py`, `design_interpolator.py`, `grid.py`, `headroom.py`, `references.py`, `neighbourhoods.py`, `bench.py`, `golden.py` |
 | `tests/` | The test suite, including the grid-evidence test |
 | `docs/` | `GUIDE.md` for users: the workflow, every control, recipes, kits and chokes, reading the report; `VALIDATION.md` and `BENCHMARK.md` for the evidence |

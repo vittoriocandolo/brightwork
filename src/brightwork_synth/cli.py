@@ -27,7 +27,21 @@ from .render import FORMATS, RenderError, db, export, render_takes
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-REFERENCES = ("closed", "open", "pedal", "crash", "ride", "bell", "analog", "shaker", "tambourine")
+REFERENCES = (
+    "closed",
+    "open",
+    "pedal",
+    "crash",
+    "ride",
+    "bell",
+    "analog",
+    "shaker",
+    "tambourine",
+    "offbeat",
+    "tight",
+    "dead",
+    "wash",
+)
 SHORTEST_BEATS, LONGEST_BEATS = 1 / 8, 16  # the grid's note values, 1/32 to 4/1, in beats of a 4/4 bar
 MAX_KEY = 127  # the highest MIDI key
 

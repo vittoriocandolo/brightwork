@@ -9,7 +9,8 @@ evidence are in [PLAN.md](PLAN.md) and [VALIDATION.md](VALIDATION.md).
 
 1. **Start from the nearest reference.** `brightwork init closed > closed.toml`.
    The references are `closed`, `open`, `pedal`, `crash`, `ride`, `bell`,
-   `analog`, `shaker` and `tambourine` (below).
+   `analog`, `shaker`, `tambourine`, `offbeat`, `tight`, `dead` and `wash`
+   (below).
 2. **Voice it in a pattern, over your loop.**
    `brightwork audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav`
    plays three closed hits and an open one per half bar, the open hat choked
@@ -41,6 +42,10 @@ patch of any exported file, take included.
 | `analog` | The drum-machine hat: six square oscillators through a band, 60 ms | `pitch`, the band, `stretch` |
 | `shaker` | One stroke: fine grains rattling 3 kHz a second over the shell's 3–12 kHz, beads clicking 300 a second over them, 220 ms | `grains_hz`, `grain_ms`, the shape for a slower or harder stroke |
 | `tambourine` | A headless tambourine: jingles (modes 110 Hz apart over 2.5–12 kHz) ringing from the strike, then shivering as they rattle down, and the hand's tap, 450 ms | the shiver's rate and level, `choke` |
+| `offbeat` | Trance's off-beat open hat: plates over 8–18 kHz, brighter and shorter than `open` (about half a second), slapping lightly | `stretch` for the tempo, `choke` on the next 16th |
+| `tight` | Tech house's closed hat: plates over 5.5–14 kHz, 65 ms, shorter and darker than `closed` | `stretch`, the plates' band |
+| `dead` | A damped hat, a towel over the plates: dark (2.5–10 kHz) with damping 2, its highs gone at once, 140 ms | damping, to take the towel off |
+| `wash` | A ride washed with a soft mallet: a 15 ms rise, highs that swell after it (bloom 0.6), 7 s | bloom, the band, `choke` |
 
 They are matched in loudness (−32.5 LUFS; the analog hat −33.1) and peak
 below −1 dBFS, so you can compare them fairly, and they share one output
