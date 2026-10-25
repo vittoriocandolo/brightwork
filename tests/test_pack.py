@@ -12,8 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile
+from numpy.typing import NDArray
 
-from brightwork_synth import cli, pack
+from brightwork_synth import cli, pack, render
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import Patch, dumps, loads, softer
 
@@ -313,3 +314,65 @@ def test_the_command_writes_a_kit(tmp_path: Path, capsys: pytest.CaptureFixture[
     code = cli.main(["pack", f"42={paths['closed']}", "--choke", "46:42", "--out", str(tmp_path / "bad")])
     assert code == BAD_INPUT
     assert "key 46 is not in the kit" in capsys.readouterr().err
+
+
+def test_one_worker_renders_the_same_kit() -> None:
+    """Build a kit in this process and in a pool of workers, and find the same audio."""
+    groups = [(42, ladder("closed", (0, 12)))]
+    alone = pack.build(groups, pack.Options(takes=2), workers=1)
+    pooled = pack.build(groups, pack.Options(takes=2), workers=2)
+    for a, b in zip(alone.keys[0].audio, pooled.keys[0].audio, strict=True):
+        assert all(np.array_equal(x, y) for x, y in zip(a, b, strict=True))
+
+
+def test_the_report_warns_of_a_loud_group_volume() -> None:
+    """Warn when a soft layer's group volume passes +6 dB, where some players stop."""
+    kit = pack.build([(42, ladder("closed", (0, 20)))], workers=1)
+    assert kit.keys[0].layers[1].volume_db > pack.LOUD_VOLUME_DB
+    assert "some players stop at +6 dB" in "\n".join(kit.lines("kit"))
+
+
+def test_kits_refuse_impossible_options() -> None:
+    """Refuse an empty kit or key, a release that is not a positive time, and more files than a kit holds."""
+    [(_, loud)] = ladder("closed", (0,))
+    with pytest.raises(pack.PackError, match="at least one key"):
+        pack.build([])
+    with pytest.raises(pack.PackError, match="at least one key"):
+        pack.build([(42, [])])
+    for release in (0.0, -1.0, math.nan, math.inf):
+        with pytest.raises(pack.PackError, match="--release"):
+            pack.build([(42, [("loud", loud)])], pack.Options(release_ms=release))
+    many = [(key, [("loud", loud)]) for key in range(65)]
+    with pytest.raises(pack.PackError, match="at most 4096"):
+        pack.build(many, pack.Options(takes=64))
+
+
+def test_a_kit_never_writes_non_finite_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a kit whose output stage yields a non-finite sample, rather than write it."""
+
+    def broken(out: render.Floats, gain: float, polarity: int) -> NDArray[np.float32]:
+        return np.full(out.shape, math.nan * gain * polarity, dtype=np.float32)
+
+    monkeypatch.setattr(pack, "output_stage", broken)
+    with pytest.raises(render.RenderError, match="non-finite"):
+        pack.build([(42, ladder("closed", (0,)))], workers=1)
+
+
+def test_the_command_refuses_what_it_cannot_read_or_fit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Exit 2 on a missing or invalid patch, and 1 on a kit over the format's ceiling, writing nothing."""
+    out = tmp_path / "kit"
+    missing = tmp_path / "missing.toml"
+    assert cli.main(["pack", f"42={missing}", "--out", str(out)]) == BAD_INPUT
+    assert f"{missing}: No such file or directory" in capsys.readouterr().err
+    invalid = tmp_path / "invalid.toml"
+    invalid.write_text('instrument = "cymbal"\n')
+    assert cli.main(["pack", f"42={invalid}", "--out", str(out)]) == BAD_INPUT
+    assert f"{invalid}: invalid patch" in capsys.readouterr().err
+    [(_, p)] = ladder("closed", (0,))
+    loud = tmp_path / "loud.toml"
+    loud.write_text(dumps(dataclasses.replace(p, output=dataclasses.replace(p.output, mode="gain", db=24.0))))
+    assert cli.main(["pack", f"42={loud}", "--out", str(out)]) == 1
+    captured = capsys.readouterr()
+    assert "velocities" in captured.out
+    assert "not written: the loudest file peaks at" in captured.err
+    assert not out.exists()
