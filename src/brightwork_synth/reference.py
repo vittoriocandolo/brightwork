@@ -43,7 +43,7 @@ from scipy.signal import upfirdn
 
 from . import carrier
 from .render import FAMILY, Domain, K, decimator, domain, rates, synthesize, take_numbers
-from .voice import Model, _gate, sample_count, saturate, tables, voice
+from .voice import Model, gate, sample_count, saturate, tables, voice
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -94,7 +94,7 @@ def x_range(model: Model, rate: int, n0: int, n1: int, count: int) -> Floats:
             b = min(hi, math.floor(float(sb.env.t[-1]) * rate) + 2)
             if a < b:
                 acc[a - lo : b - lo] += sb.env.on(t[a - lo : b - lo]) * _carrier(tab, ip, a, b)
-        factor = s.gain * _gate(s, t)
+        factor = s.gain * gate(s, lo, hi, rate)
         if v.damper is not None:
             factor = factor * v.damper.on(t)
         x[lo - n0 : hi - n0] += factor * acc

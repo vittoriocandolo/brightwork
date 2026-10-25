@@ -10,6 +10,7 @@ stays and the cut does not leak. Listening decides the rest; this checks that
 the edits are short and predictable.
 """
 
+import dataclasses
 import math
 
 import numpy as np
@@ -27,6 +28,7 @@ type Floats = NDArray[np.float64]
 
 RATE = 48000
 EDITS = 3  # field edits a task may take, at most
+TAKES = 4  # a rattle's measurements average this many takes
 HEADROOM_DB = 3.0  # of drive headroom, at least, on every take of every reference
 MATCHED_DB = 1.0  # the references' loudnesses lie within this of each other
 CHOKED_S = 0.3  # the closed open hat lasts less than this
@@ -360,3 +362,62 @@ def test_retune_and_darken_the_analog_hat() -> None:
     assert log_shift_semitones(x, audio(up)) == pytest.approx(3.0, abs=0.2)
     darker = edit(p, **{"tone[1].band_hz": [6000.0, 11000.0]})  # one field
     assert centroid(audio(darker)) < 0.9 * centroid(x)
+
+
+# From the shaker.
+
+
+def granularity(p: patch.Patch, start_ms: float = 10.0, end_ms: float = 100.0) -> float:
+    """Measure how granular a rattle sounds: its 2 ms envelope's fluctuation about its 20 ms one, over four takes."""
+
+    def envelope(x: Floats, ms: float) -> Floats:
+        n = round(ms * RATE / 1000)
+        out: Floats = np.sqrt(np.convolve(x * x, np.ones(n) / n, "same"))
+        return out
+
+    a, b = round(start_ms * RATE / 1000), round(end_ms * RATE / 1000)
+    found = []
+    for take in range(1, TAKES + 1):
+        x = audio(dataclasses.replace(p, take=take))
+        fine, coarse = envelope(x, 2)[a:b], envelope(x, 20)[a:b]
+        sounding = coarse > 0  # a sparse rattle can fall silent between collisions
+        found.append(float(np.std(fine[sounding] / coarse[sounding])))
+    return float(np.mean(found))
+
+
+def test_loosen_and_smooth_the_shaker() -> None:
+    """Loosen the shaker's grains with two fields, and smooth them with two."""
+    p = ref("shaker")
+    base = granularity(p)
+    looser = edit(p, **{"noise[1].grains_hz": 600.0, "noise[1].grain_ms": 4.0})
+    smoother = edit(p, **{"noise[1].grains_hz": 4000.0, "noise[2].level_db": p.noise[1].level_db - 12})
+    assert granularity(looser) > 1.2 * base
+    assert granularity(smoother) < 0.9 * base
+
+
+def test_lengthen_the_stroke_and_brighten_the_shaker() -> None:
+    """Lengthen the stroke with one command, and brighten the shell with one field."""
+    p = ref("shaker")
+    x = audio(p)
+    assert decay_ms(audio(patch.stretch(p, "all", 1.6))) > 1.25 * decay_ms(x)  # one command
+    brighter = edit(p, **{"noise[1].band_hz": [4000.0, 16000.0]})  # one field: a cabasa's
+    assert centroid(audio(brighter)) > 1.05 * centroid(x)
+
+
+# From the tambourine.
+
+
+def test_shake_the_tambourine_longer_and_choke_it() -> None:
+    """Shake the tambourine longer with one command, and choke it with another."""
+    p = ref("tambourine")
+    x = audio(p)
+    assert decay_ms(audio(patch.stretch(p, "noise[2].amp", 2.0))) > 1.25 * decay_ms(x)  # one command: the shiver
+    choked = audio(patch.choke(p, 60.0, release=20.0))  # one command
+    assert decay_ms(choked) < 0.6 * decay_ms(x)
+
+
+def test_thin_the_tambourine_shiver() -> None:
+    """Thin the shiver to fewer, drier jingle collisions with two fields."""
+    p = ref("tambourine")
+    thinner = edit(p, **{"noise[2].grains_hz": 120.0, "noise[2].grain_ms": 15.0})
+    assert granularity(thinner, 30, 200) > 1.2 * granularity(p, 30, 200)

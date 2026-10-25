@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from brightwork_synth import cli, patch
+from brightwork_synth import carrier, cli, patch
 from brightwork_synth.reference import CHECK, DEEP, REFERENCE, compare, reference
 from brightwork_synth.render import LIMIT, QUIET, SATURATION, synthesize
 
@@ -58,6 +58,7 @@ REPORT_EVERY = 25  # fixtures between progress lines
 DEEP_EVERY = 10  # every tenth fixture is also checked at 512 × base
 TOP_HZ = 20000.0
 DAMPED = 0.2  # the share of random fixtures that a damper chokes
+RATTLING = 0.3  # the share of random sources that rattle
 
 
 def say(text: str) -> None:
@@ -87,7 +88,7 @@ STRUCK = amp((0, 0), (0.02, 1), (0.12, 0.7), (20, 0.12), (60, 0))  # a tone's sh
 
 
 def noise(level: float, band: Sequence[float], spacing: float = 14.0, shape: Knots = PLATES, **fields: float) -> Source:
-    """Write a noise source; `fields` sets damping (0.5 unless set), bloom, chatter and chatter_hz (220 Hz)."""
+    """Write a noise source; `fields` sets damping (0.5 unless set), bloom, chatter, chatter_hz (220 Hz) and rattle."""
     source: Source = {
         "level_db": float(level),
         "band_hz": [float(band[0]), float(band[1])],
@@ -96,10 +97,12 @@ def noise(level: float, band: Sequence[float], spacing: float = 14.0, shape: Kno
         "bloom": 0.0,
         "chatter": 0.0,
         "chatter_hz": 220.0,
+        "grains_hz": 0.0,
+        "grain_ms": 10.0,
         "amp": copy.deepcopy(shape),
     }
     for key, value in fields.items():
-        if key not in ("damping", "bloom", "chatter", "chatter_hz"):
+        if key not in ("damping", "bloom", "chatter", "chatter_hz", "grains_hz", "grain_ms"):
             msg = f"a noise source has no field {key!r} to set"
             raise TypeError(msg)
         source[key] = float(value)
@@ -114,7 +117,7 @@ def tone(
     levels: Sequence[float] | None = None,
     **fields: object,
 ) -> Source:
-    """Write a tone; `fields` sets wave ("square" unless set), phase ("free"), damping (0.3) and bloom."""
+    """Write a tone; `fields` sets wave ("square" unless set), phase ("free"), damping (0.3), bloom and rattle."""
     source: Source = {
         "level_db": float(level),
         "wave": "square",
@@ -125,12 +128,14 @@ def tone(
         "bloom": 0.0,
         "chatter": 0.0,
         "chatter_hz": 220.0,
+        "grains_hz": 0.0,
+        "grain_ms": 10.0,
         "amp": copy.deepcopy(shape or STRUCK),
     }
     for key, value in fields.items():
         if key in ("wave", "phase"):
             source[key] = str(value)
-        elif key in ("damping", "bloom") and isinstance(value, (int, float)):
+        elif key in ("damping", "bloom", "grains_hz", "grain_ms") and isinstance(value, (int, float)):
             source[key] = float(value)
         else:
             msg = f"a tone has no field {key!r} to set to {value!r}"
@@ -207,7 +212,7 @@ def fixtures() -> list[Fixture]:
         if valid(edits):
             out.append((family, name, edits))
 
-    for family in (_noise, _damping, _chatter, _ticks, _tones, _chokes, _layers, _dynamics):
+    for family in (_noise, _damping, _chatter, _ticks, _tones, _chokes, _layers, _dynamics, _rattles):
         family(add)
     _seeds(add, out)
     _rates(add)
@@ -259,6 +264,28 @@ def _chatter(add: Add) -> None:
                     **{"noise[1].level_db": 0.0, "noise[1].chatter": depth, "noise[1].chatter_hz": float(rate)},
                     **{"noise[2].level_db": -INF, "drive.db": float(drive)},
                 )
+
+
+def _rattles(add: Add) -> None:
+    """Add collision rates × rings over a shaker's shell, a tambourine's jingles and the whole band, level × drive."""
+    shake = amp((0, 0), (20, 1), (60, 0.6), (150, 0.1), (250, 0))
+    bands = {"shell": ((3000, 9000), 0.0), "jingles": ((2500, 12000), 120.0), "bright": ((1000, 20000), 0.0)}
+    pairs = ((0, 0), (0, 12), (0, 24), (12, 0), (12, 12))
+    for rate in (20, 200, 1000, 4000):
+        for ring in (1, 6, 30, 200):
+            for bname, (band, spacing) in bands.items():
+                for level, drive in pairs:
+                    add(
+                        "rattles",
+                        f"g{rate}-r{ring}-{bname}-L{level}-d{drive}",
+                        noise=[noise(level, band, spacing, shake, damping=0.0, grains_hz=rate, grain_ms=ring)],
+                        **{"drive.db": float(drive)},
+                    )
+    # A tambourine: jingles and a struck head sharing their collisions, under chatter.
+    jingles = noise(0, (2500, 12000), 120.0, shake, damping=0.5, chatter=0.3, grains_hz=150, grain_ms=80)
+    head = tone(-6, (180.0, 290.0), (100, 2000), shake, wave="sine", phase="strike", grains_hz=150, grain_ms=30)
+    for drive in (0, 12, 24):
+        add("rattles", f"tambourine-d{drive}", noise=[jingles], tone=[head], **{"drive.db": float(drive)})
 
 
 def _ticks(add: Add) -> None:
@@ -389,9 +416,15 @@ def _rates(add: Add) -> None:
 def _random(out: list[Fixture]) -> None:
     """Add a seeded random sample of the whole valid domain, every fixture sounding."""
     rng = np.random.default_rng(2026)
+    rattles = np.random.default_rng(2027)  # its own stream, so the fixtures drawn before rattles keep their draws
     made = 0
     while made < RANDOM_FIXTURES:
         e = random_edits(rng)
+        for source in [*e["noise"], *e["tone"]]:
+            if rattles.uniform() < RATTLING:
+                ring = float(10 ** rattles.uniform(0, 2.3))
+                source["grain_ms"] = ring
+                source["grains_hz"] = min(float(10 ** rattles.uniform(1, 3.3)), 1000 * patch.MAX_OVERLAP / ring)
         if valid(e):
             out.append(("random", f"r{made:03d}", e))
             made += 1
@@ -608,7 +641,10 @@ def run(args: argparse.Namespace) -> None:
     say(f"{len(jobs)} fixtures to run at K = {args.k} ({len(done)} already in {out})")
     start = time.perf_counter()
     fresh = not out.exists()
-    with out.open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with (
+        out.open("a", newline="", encoding="utf-8") as f,
+        ProcessPoolExecutor(args.workers, initializer=carrier.share_cores, initargs=(args.workers,)) as pool,
+    ):
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()

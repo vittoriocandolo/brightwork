@@ -13,7 +13,7 @@ The first public release.
 
 ### Added
 
-- A one-voice hi-hat and cymbal synthesizer: noise sources of seeded modes or
+- A one-voice hi-hat, cymbal and percussion synthesizer: noise sources of seeded modes or
   continuous noise in a band, tones of square or sine partials struck at zero
   phase or free, damping and bloom that make high frequencies decay faster
   and rise later, chatter that gates a source as plates that slap, a damper
@@ -26,10 +26,18 @@ The first public release.
   drive headroom left before the status changes. `brightwork verify` checks a
   render against a reference rendered at 128 times the base rate, itself
   checked against one at 256.
+- Rattles for the tops of a groove, shakers, tambourines, maracas and
+  cabasas: any source can sound at a seeded stream of collisions,
+  `grains_hz` of them a second at the shape's peak, one to a cell of time,
+  thinning out with the shape, each ringing for `grain_ms`, as loud at the
+  peak as the plain source. Sources with the same rate share their
+  collisions. Every collision is smooth and counted by the validated-domain
+  rule.
 - Frozen minimum-phase decimators and linear-phase interpolators for the
   44.1 and 48 kHz families, verified by checksum.
-- Seven references to start from: `closed`, `open`, `pedal`, `crash`, `ride`,
-  `bell` and `analog`, matched in loudness and sharing one output setting.
+- Nine references to start from: `closed`, `open`, `pedal`, `crash`, `ride`,
+  `bell`, `analog`, `shaker` and `tambourine`, matched in loudness and sharing
+  one output setting.
 - Patches in TOML, read as UTF-8 or UTF-16, with every field required, every
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `pitch` by semitones or to a

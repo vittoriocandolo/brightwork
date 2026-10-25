@@ -1,6 +1,7 @@
 # Brightwork
 
-A one-voice hi-hat and cymbal synthesizer, rendered offline to WAV. Every
+A one-voice synthesizer of hi-hats, cymbals and the tops beside them, shakers
+and tambourines, rendered offline to WAV. Every
 stage is a pure function of time, every render states whether it lies where
 its aliasing is demonstrated below −100 dB, and a render depends only on its
 patch: the cymbal, which is its seed, and the strike, which is its take.

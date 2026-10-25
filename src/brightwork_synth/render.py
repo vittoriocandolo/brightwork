@@ -445,11 +445,21 @@ class Cause:
     @property
     def where(self) -> str:
         """Describe the knot that contributes most to the kink bound."""
-        return f"{100 * self.share:.0f}% at {self.knot} ({self.knot_ms:g} ms)"
+        return f"{100 * self.share:.0f}% at {self.knot}{_at(self.knot_ms)}"
 
 
-def knot_ms(p: Patch, path: str) -> float:
-    """Return the time of a knot named by its path, such as "noise[2].amp[3]" or "damper.amp[1]", as written."""
+def _at(ms: float | None) -> str:
+    """Say when a knot is, if it is one knot."""
+    return "" if ms is None else f" ({ms:g} ms)"
+
+
+def knot_ms(p: Patch, path: str) -> float | None:
+    """Return the time of a knot named by its path, such as "noise[2].amp[3]" or "damper.amp[1]", as written.
+
+    A source's collisions, "noise[1].grains", have knots throughout: None.
+    """
+    if path.endswith(".grains"):
+        return None
     curve, index = path[: path.rindex("[")], int(path[path.rindex("[") + 1 : -1])
     if curve == "damper.amp":
         knots = p.damper.amp
@@ -621,7 +631,7 @@ class Take:
         if h.db == math.inf:
             return f"{text}; inside at every drive up to {DRIVE_MAX:g} dB"
         if h.db == -math.inf:
-            knot = "" if c.dominant == "kinks" or c.knot is None else f", most at {c.knot} ({c.knot_ms:g} ms)"
+            knot = "" if c.dominant == "kinks" or c.knot is None else f", most at {c.knot}{_at(c.knot_ms)}"
             return f"{text}; outside even without drive: the kinks alone exceed the limit{knot}"
         if h.db >= 0:
             return f"{text}; drive headroom {_floor1(h.db):+.1f} dB"
@@ -655,6 +665,8 @@ class SourceInfo:
     spacing_hz: float | None = None  # their realized mean spacing
     partials_hz: tuple[float, ...] = ()  # realized partials
     wave: str | None = None
+    collisions: int | None = None  # this take's, when the source rattles
+    grain_ms: float = 0.0
 
     def line(self) -> str:
         """Describe the source in one line."""
@@ -675,7 +687,8 @@ class SourceInfo:
             if self.wave == "sine":
                 what += f" (the lowest {describe_pitch(self.partials_hz[0])})"
             what += f", band {lo:g}–{hi:g} Hz"
-        return f"{self.path} {what}; {bands}"
+        rattle = f"; {self.collisions} collisions ringing {self.grain_ms:g} ms" if self.collisions is not None else ""
+        return f"{self.path} {what}; {bands}{rattle}"
 
 
 def source_info(p: Patch) -> tuple[SourceInfo, ...]:
@@ -693,6 +706,8 @@ def source_info(p: Patch) -> tuple[SourceInfo, ...]:
         elif isinstance(s, Tone):
             partials = tuple(spectrum.grid_bin(f) / spectrum.BINS_PER_HZ for f, _ in s.partials)
             info = dataclasses.replace(info, partials_hz=partials, wave=s.wave)
+        if src.grains is not None:
+            info = dataclasses.replace(info, collisions=int(src.grains.onsets.size), grain_ms=s.grain_ms)
         out.append(info)
     return tuple(out)
 

@@ -55,8 +55,9 @@ the offline renderer it drives liquidsfz with.
 - **Patches have no defaults.** A new field means a new schema version, and
   older schemas keep rendering exactly as before.
 - **Seeds and names are forever.** The keys that seed the modes, the strike,
-  the noise, the phases and the dither, `cymbal/modes/v1`, `cymbal/strike/v1`,
-  `cymbal/noise/v1`, `cymbal/phase/v1` and `cymbal/dither/v1`, the patch's
+  the noise, the phases, the collisions and the dither, `cymbal/modes/v1`,
+  `cymbal/strike/v1`, `cymbal/noise/v1`, `cymbal/phase/v1`,
+  `cymbal/grains/v1` and `cymbal/dither/v1`, the patch's
   `instrument = "cymbal"` and the WAV chunk `cymb` never change: a new
   behavior takes a new key. They keep the name the instrument was designed
   under, so that the evidence in `docs/` stays the evidence for this code.

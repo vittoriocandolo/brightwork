@@ -29,6 +29,8 @@ damping    = 0.5            # content at f decays (f / 6 kHz)^0.5 times faster
 bloom      = 0.0            # and rises (f / 6 kHz)^bloom times slower
 chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
 chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
 amp = [                     # shape: 0 at both ends, highest point exactly 1
   { ms = 0.0,   gain = 0.0 },
   { ms = 0.3,   gain = 1.0 },
@@ -46,6 +48,8 @@ damping    = 0.0
 bloom      = 0.0
 chatter    = 0.0
 chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
 amp = [
   { ms = 0.0,  gain = 0.0 },
   { ms = 0.03, gain = 1.0 },
@@ -86,6 +90,8 @@ TONE = {
     "bloom": 0.0,
     "chatter": 0.0,
     "chatter_hz": 220.0,
+    "grains_hz": 0.0,
+    "grain_ms": 10.0,
     "amp": [
         {"ms": 0.0, "gain": 0.0},
         {"ms": 0.02, "gain": 1.0},

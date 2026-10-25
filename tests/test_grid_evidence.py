@@ -48,6 +48,7 @@ FAMILIES = {
     "chokes",
     "layers",
     "dynamics",
+    "rattles",
     "seeds",
     "rates",
     "random",

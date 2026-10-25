@@ -27,7 +27,7 @@ from .render import FORMATS, RenderError, db, export, render_takes
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-REFERENCES = ("closed", "open", "pedal", "crash", "ride", "bell", "analog")
+REFERENCES = ("closed", "open", "pedal", "crash", "ride", "bell", "analog", "shaker", "tambourine")
 SHORTEST_BEATS, LONGEST_BEATS = 1 / 8, 16  # the grid's note values, 1/32 to 4/1, in beats of a 4/4 bar
 MAX_KEY = 127  # the highest MIDI key
 
@@ -359,7 +359,8 @@ def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the brightwork command, and return its exit status."""
-    ap = argparse.ArgumentParser(prog="brightwork", description="A one-voice hi-hat and cymbal synthesizer.")
+    what = "A one-voice synthesizer of hi-hats, cymbals, shakers and tambourines."
+    ap = argparse.ArgumentParser(prog="brightwork", description=what)
     ap.add_argument("--version", action="version", version=f"brightwork {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     _render_commands(sub)

@@ -63,7 +63,7 @@ On the goal of never needing another cymbal or hi-hat sample: no plan can guaran
 | Packs on one key | Kits: several keys, each with velocity layers and takes, and choke groups | A hi-hat is several articulations of one instrument |
 | Mono | Mono, or two takes as a stereo pair | Cymbals are usually recorded and used in stereo |
 | Audition on the backbeat | Also on subdivisions, in patterns and with chokes | Hats are judged in patterns |
-| Six references | Seven | The family is wider |
+| Six references | Nine | The family is wider, and reaches the tops |
 
 ---
 
@@ -71,9 +71,9 @@ On the goal of never needing another cymbal or hi-hat sample: no plan can guaran
 
 The instrument has one voice. Up to four noise sources and two tones are summed into one saturator, band-limited once, and rendered offline to a mono WAV, or to a stereo WAV made of two takes.
 
-It is built for producers and sound designers who program hi-hats and cymbals in a DAW or a sampler. It renders one-shots, sets of round-robin takes, and kits: articulations on several keys, each with velocity layers, and choke groups that a sampler plays.
+It is built for producers and sound designers who program hi-hats, cymbals and the tops of a groove in a DAW or a sampler: first the producers of house, tech house and trance, whose kick leads the mix and whose tops carry its groove, and from there along one axis, from the programmed machine to the played band. It renders one-shots, sets of round-robin takes, and kits: articulations on several keys, each with velocity layers, and choke groups that a sampler plays.
 
-Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. Seven reference patches define acceptance:
+Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. With rattles (§2.12) it reaches the tops beside them: shakers, tambourines, maracas and cabasas. Nine reference patches define acceptance:
 
 - **Closed:** tight, bright plates with a stick tick.
 - **Open:** plates that ring and sizzle.
@@ -82,6 +82,8 @@ Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal
 - **Ride:** a defined ping over a sustained wash.
 - **Bell:** a ride's bell; a few strong partials, long and clearly pitched.
 - **Analog:** six square oscillators through a band; a drum machine's closed hat.
+- **Shaker:** one stroke of a shaker: fine grains rattling against the shell, larger beads clicking over them.
+- **Tambourine:** a hand on a headless tambourine: the jingles ring from the strike, then shiver as they rattle down.
 
 These are starting patches. Their names never select hidden algorithms.
 
@@ -90,7 +92,7 @@ Six things are outside the model or the family:
 - Gongs and tam-tams, whose pitch glides and whose tails outlast 8 s. Bells, cowbells and other tuned metal are also out of family: a tone can make them, but no reference covers them.
 - Performance: rolls, swells, bowing, brushes, and the continuous pedal of an electronic hi-hat. One patch is one hit. Openness is a set of articulations, and dynamics are velocity layers (§2.11).
 - Sounds defined by processing or storage: rooms and reverb, filtering after the fact, and the 6-bit samples of machines such as the TR-909, whose cymbals are recordings of acoustic cymbals played through low-resolution memory. Their acoustic source is in the family; their playback character is not.
-- Rivet and sizzle cymbals, whose rattle is impulsive. This is pre-registered (§8.5).
+- Rivet and sizzle cymbals, whose rivets buzz against the plate. A rattle on a cymbal's modes can approach them (§2.12), but no reference covers them.
 - FM and wavetable metallics, whose spectra follow a moving modulation index or a table. Coherent sources can approach them.
 - A real-time plugin. The renderer is a pure function of the patch; it takes about 0.2 s for a closed hat and under 2 s for an 8 s ride (estimated). A later frontend could render on every edit and play cached buffers from MIDI. That frontend is not part of this plan.
 
@@ -107,7 +109,7 @@ The symbols:
 - j counts the sources, noise and tones alike, and g_j is a source's gain.
 - c_jb is sub-band b of the source's carrier: a fixed spectrum of lines on the grid (§2.3), weighted by the sub-band's window.
 - e_j is the source's shape, and τ_jb the sub-band's time map, which carries damping and bloom (§2.6).
-- G_j is the source's chatter gate (§2.7), and D the damper (§2.8).
+- G_j is the source's gate: its chatter gate (§2.7) times its collisions R_j when it rattles (§2.12). D is the damper (§2.8).
 - S_α, h, F, K, g_out and p are the snare's: the saturator, the frozen decimator of length L, the internal rate, the decimation factor, the output gain and the polarity.
 
 Everything before the decimator is a pure function of time, with no state.
@@ -284,6 +286,20 @@ Nothing else changes. There is no glide rule, since there is no glide.
 
 A harder strike also drives the plate further into its chaotic regime, and its spectrum further up (Chaigne, Touzé and Thomas; Touzé, Bilbao and Cadot). No rule models that yet; it is pre-registered as a cascade rule (§8.5). As in the snare, a rise is the run of increasing knots that ends at a local maximum, the rules are exact on the whole curve, 0 turns the contact rule off, and the command fails rather than clamping.
 
+### 2.12 Rattles
+
+$$R_j(t)=a\sum_i \beta_j(t-t_i),\qquad a=\frac{1}{\sqrt{m(\lambda)}},\qquad m(\lambda)=\lambda\!\int\!\beta^2+\lambda^2\Big[\Big(\int\!\beta\Big)^2-\int(\beta\star\beta)(\tau)\,\mathrm{tri}(\lambda\tau)\,d\tau\Big]$$
+
+Shakers, tambourines, maracas and cabasas are struck by many small collisions rather than one strike: beads against a shell, jingles against each other and their frame. A source with `grains_hz` > 0 is multiplied by a stream of collisions R_j, as it is by its chatter gate, so what rings at each collision is the source itself: a band of noise for a shaker's shell, modes for jingles, partials for a head.
+
+- **One collision** β rises to 1 in 0.1 ms and falls through a knot every 10 dB to −60 dB at `grain_ms`, then to 0: a Hermite curve like every shape, so the collision rings as the source would after a tap.
+- **When.** Time from the trigger is cut into cells of 1/λ, λ = `grains_hz`, and each cell holds one candidate at a uniform place in it, drawn from the seed and the take (key `cymbal/grains/v1`), as each cell of a cymbal holds one mode (§2.4). The shape keeps a candidate with probability e_j(t_i): collisions crowd at the peak of a shake and thin out as it dies away, as beads collide less often as the energy they share falls. Sources with the same rate share their collisions, as a tambourine's jingles and head are struck by the same hand.
+- **Why cells.** A Poisson stream clumps. Overlapping collisions add up, so a shake's energy goes as the square of how many fall near its peak, and with a Poisson count one shake of a dense shaker came out 3–5 dB louder than the next (measured over takes). One candidate per cell keeps the timing irregular and the count steady: about 1 dB over takes, as for the closed hat.
+- **How strong.** Every collision has the same strength, as in Cook's PhISEM, where each collision adds the same energy and the noise it excites carries the randomness; here that noise is the source's own carrier. a normalizes R to a mean square of exactly 1 at the shape's peak, where m is the mean square of unit collisions one to a cell (pairs at lag τ have density λ²(1 − tri(λτ))). A rattle is as loud there as the source it gates, and as the rate grows it tends to that source. Below the peak fewer collisions are kept, so the energy falls faster than the shape, as a dying shake's does.
+- **Limits.** At most 64 collisions ring at once at the shape's peak; past that a rattle sounds as the plain source. Collisions are part of the strike: `pitch`, `stretch` and `softer` leave the rate and the ring as written.
+
+Every collision's knots are kinks of the source (§5). R is piecewise cubic, so it is rendered exactly by summing each run of 256 samples' cubic coefficients once, aligned to the start, and a sample never depends on the block.
+
 ## 3. Rendering policy
 
 **Internal rate and families.** As in the snare: F = K × base, where base is 44.1 or 48 kHz. The 88.2 and 96 kHz exports reuse their family's F and filter with factor K/2, so a 96 kHz file is exactly the 48 kHz file with the in-between samples filled in.
@@ -388,6 +404,8 @@ damping    = 0.5            # content at f decays (f / 6 kHz)^0.5 times faster
 bloom      = 0.0            # and rises (f / 6 kHz)^bloom times slower
 chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
 chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
 amp = [                     # shape: 0 at both ends, highest point exactly 1
   { ms = 0.0,   gain = 0.0 },
   { ms = 0.3,   gain = 1.0 },
@@ -405,6 +423,8 @@ damping    = 0.0
 bloom      = 0.0
 chatter    = 0.0
 chatter_hz = 220.0
+grains_hz  = 0.0
+grain_ms   = 10.0
 amp = [
   { ms = 0.0,  gain = 0.0 },
   { ms = 0.03, gain = 1.0 },
@@ -443,6 +463,8 @@ damping    = 0.3            # f_ref: the higher of the band's lower edge and the
 bloom      = 0.0
 chatter    = 0.0
 chatter_hz = 220.0
+grains_hz  = 0.0
+grain_ms   = 10.0
 amp = [ … ]
 ```
 
@@ -481,7 +503,7 @@ There are three separate promises, as in the snare:
 
 - **Valid domain.** What the parser accepts. The renderer promises defined, finite output with bounded time and memory.
 - **Validated domain.** Where the numerical criteria of §8 are demonstrated.
-- **Voiced regions.** The recorded neighbourhoods of the seven references, where musical usefulness is promised.
+- **Voiced regions.** The recorded neighbourhoods of the references, where musical usefulness is promised.
 
 "Excellent everywhere" is not claimed. The hard limits are:
 
@@ -494,6 +516,7 @@ There are three separate promises, as in the snare:
 | `wave` / `phase` | `"sine"` or `"square"` / `"strike"` or `"free"` |
 | `damping`, `bloom` | 0 – 3, with (20 kHz / f_ref)^damping and (20 kHz / f_ref)^bloom ≤ 1000 |
 | `chatter` / `chatter_hz` | 0 – 1 / 10 – 4,000 |
+| `grains_hz` / `grain_ms` | 0 – 4,000 / 1 – 1,000, with grains_hz · grain_ms / 1000 ≤ 64 collisions ringing at once |
 | source `level_db` | −inf, or −90 – +24 |
 | drive | 0 – 48 dB |
 | knots per curve | amplitude 3 – 32; damper none, or 2 – 32 |
@@ -513,7 +536,7 @@ $$\text{predicted}=C\,e^{-\pi^2/q_{\mathrm{knee}}}\,P+B_{\mathrm{kink}}\;\le\;10
 
   Each J_n is a jump in the n-th derivative of y at a knot, computed exactly from the carriers and their slopes there, and from the saturator's local slope S′ and curvature S″. It is extended in four places:
   1. **Sub-bands.** Each sub-band's knots are mapped by its time map. Rise jumps scale by r_b⁻² and r_b⁻³, decay jumps by s_b² and s_b³, and at the peak the stretched rise joins the compressed decay. Each jump multiplies that sub-band's own carrier.
-  2. **Chatter.** A gated source also jumps wherever its shape does, through the gate.
+  2. **Gates.** A chattering source also jumps wherever its shape does, through its chatter gate, and a rattling one at every knot of every collision (§2.12), each jump times the rest of the gate.
   3. **The damper.** Every knot of the damper is a kink of every source it multiplies.
   4. **Carriers at knots.** Values and slopes come from the table through the interpolator's own windowed sinc, evaluated as a continuous function at the knot's exact time: accurate to 10⁻¹³ of the carrier's RMS in value and 10⁻¹² of its RMS slope (measured). The bound is still inflated by 1%, as on the snare, whose cubic interpolation was accurate only to 1.6·10⁻⁶ in value and 10⁻⁴ in slope.
 
@@ -740,7 +763,7 @@ The grid runs at 16× and 32×, and at 64× if §3's criterion calls for it. It 
 
 ### 8.4 Listening and usability
 
-The seven references become recorded acceptance material:
+The references become recorded acceptance material:
 
 - approved patches, matched in loudness within 1 dB and peaking below −1 dBFS;
 - measured useful neighbourhoods in band, spacing, damping, bloom, chatter, tail length and drive;
@@ -768,17 +791,16 @@ Each task should take at most three field edits or one command, and move a measu
 
 ### 8.5 The sample-replacement benchmark
 
-This is where "no more cymbal or hi-hat samples" becomes a measurement.
+This is where "no more cymbal, hi-hat or shaker samples" becomes a measurement.
 
-1. Collect the 20–30 hi-hat and cymbal samples you actually use that fall inside the family, with their articulations and velocity layers where they have them.
+1. Collect the 20–30 hi-hat, cymbal and top samples you actually use that fall inside the family, with their articulations and velocity layers where they have them.
 2. For each one, voice a patch within a fixed time limit, using `audition --against`.
 3. Compare the two blind and level-matched, in context with a groove, over several takes. Compare hats in patterns with their chokes, and, where the source has layers, compare kits in a groove with dynamics.
 
 The claim holds for the fraction that passes. Each failure is sorted as a missing control, a voicing-skill issue, or out of family.
 
-Nine additions are pre-registered and may be added only if they fix recorded failures:
+Impulsive sizzle with a density control, for rivets and loose hats, was pre-registered here; rattles (§2.12), added when the family widened to the tops, now provide it. Eight additions are pre-registered and may be added only if they fix recorded failures:
 
-- impulsive sizzle with a density control, for rivets and loose hats;
 - chatter at a jittered rate, if the periodic gate buzzes;
 - a cascade rule in `softer`, if softer hits need to bloom less and reach less high than contact alone gives;
 - take variation that keeps part of each mode's amplitude, if takes of one cymbal sound like different cymbals;
@@ -820,7 +842,7 @@ It installs with pip as one package with a `cymbal` command, and its tests run o
 | `wav.py` | RIFF writing and reading, float and PCM, mono and stereo |
 | `audition.py` | Tempo, subdivisions and patterns, chokes, beds, A/B and blind order, watching, takes, stereo, playback |
 | `cli.py` | Commands |
-| `data/` | Frozen decimators and interpolators with checksums, the seven references |
+| `data/` | Frozen decimators and interpolators with checksums, the nine references |
 | `tools/` | `design_decimator.py`, `design_interpolator.py`, `grid.py`, `headroom.py`, `references.py`, `neighbourhoods.py`, `bench.py`, `golden.py` |
 | `tests/` | The test suite, including the grid-evidence test |
 | `docs/` | `GUIDE.md` for users: the workflow, every control, recipes, kits and chokes, reading the report; `VALIDATION.md` and `BENCHMARK.md` for the evidence |
@@ -847,7 +869,7 @@ Six decisions remain, each with its settling method:
 |---|---|
 | The sub-band step: √2, or 2^(1/4) if tails sound stepped | Listening to the references' tails, then the budget |
 | Whether spacing, bloom, chatter, the damper and stereo pairs earn their place | Voicing and the usability tasks |
-| Voiced ranges of spacing, damping, bloom, chatter and drive | The seven references |
+| Voiced ranges of spacing, damping, bloom, chatter and drive | The references |
 | `softer`'s default exponent, and whether contact should darken square tones | Voicing kits from the references |
 | The period and maximum length, 8 s, or 16 s for long rides | Use, and the cost of doubling every table |
 | The default choke release | Voicing hi-hat patterns in two SFZ players |
@@ -870,6 +892,7 @@ Everything else above is specified.
 - C. Touzé, S. Bilbao and O. Cadot (2012). Transition scenario to turbulence in thin vibrating plates. *Journal of Sound and Vibration* 331(2), 412–433.
 - M. Ducceschi and C. Touzé (2015). Modal approach for nonlinear vibrations of damped impacted plates: application to sound synthesis of gongs and cymbals. *Journal of Sound and Vibration* 344, 313–331.
 - S. Sekiguchi and T. Samejima (2023). Physical modeling and sound synthesis of the hi-hat. *Acoustical Science and Technology* 44(5), 352–359.
+- P. R. Cook (1997). Physically informed sonic modeling (PhISM): synthesis of percussive sounds. *Computer Music Journal* 21(3), 38–49. The stochastic event model of shakers.
 - K. J. Werner, J. S. Abel and J. O. Smith (2014). The TR-808 cymbal: a physically-informed, circuit-bendable, digital model. *Proceedings of the International Computer Music Conference and Sound and Music Computing Conference*, Athens.
 - G. Reid (2002). Synth Secrets: practical cymbal synthesis. *Sound On Sound*.
 - K. L. Johnson (1985). *Contact Mechanics*. Cambridge University Press. Hertzian impact.

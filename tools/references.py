@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""The seven references by measurement (plan §3, §8.4): seeds 1–4 × takes 1–8 at the shipping K.
+"""The references by measurement (plan §3, §8.4): seeds 1–4 × takes 1–8 at the shipping K.
 
 For each reference it reports the loudness and sample peak of every take,
 whether each take is inside the validated domain and its drive headroom, and
@@ -25,6 +25,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING, Any
 
+from brightwork_synth import carrier
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import loads
@@ -84,7 +85,7 @@ def summarize(name: str, rows: list[Row]) -> Row:
 def measure(seeds: int, takes: int, workers: int) -> list[Row]:
     """Measure every take of every reference, in parallel processes, and summarize each reference."""
     jobs = [(n, s, t) for n in REFERENCES for s in range(1, seeds + 1) for t in range(1, takes + 1)]
-    with ProcessPoolExecutor(workers) as pool:
+    with ProcessPoolExecutor(workers, initializer=carrier.share_cores, initargs=(workers,)) as pool:
         rows = list(pool.map(take_row, jobs, chunksize=1))
     return [summarize(n, [r for r in rows if r["name"] == n]) for n in REFERENCES]
 

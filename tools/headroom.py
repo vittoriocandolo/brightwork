@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from brightwork_synth import carrier
 from brightwork_synth.patch import from_dict
 from brightwork_synth.render import (
     DRIVE_MAX,
@@ -230,7 +231,10 @@ def run(args: argparse.Namespace) -> None:
     say(f"{len(jobs)} fixtures to run ({len(done)} already in {out})")
     start = time.perf_counter()
     fresh = not out.exists()
-    with out.open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with (
+        out.open("a", newline="", encoding="utf-8") as f,
+        ProcessPoolExecutor(args.workers, initializer=carrier.share_cores, initargs=(args.workers,)) as pool,
+    ):
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()

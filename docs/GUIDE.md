@@ -1,15 +1,15 @@
 # User guide
 
-This guide is for producers and sound designers who program hi-hats and
-cymbals. It covers the workflow, every control, recipes for common edits, kits
+This guide is for producers and sound designers who program hi-hats, cymbals
+and tops such as shakers and tambourines. It covers the workflow, every control, recipes for common edits, kits
 with chokes, and how to read what a render reports. The design and its
 evidence are in [PLAN.md](PLAN.md) and [VALIDATION.md](VALIDATION.md).
 
 ## The workflow
 
 1. **Start from the nearest reference.** `brightwork init closed > closed.toml`.
-   The references are `closed`, `open`, `pedal`, `crash`, `ride`, `bell` and
-   `analog` (below).
+   The references are `closed`, `open`, `pedal`, `crash`, `ride`, `bell`,
+   `analog`, `shaker` and `tambourine` (below).
 2. **Voice it in a pattern, over your loop.**
    `brightwork audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav`
    plays three closed hits and an open one per half bar, the open hat choked
@@ -39,6 +39,8 @@ patch of any exported file, take included.
 | `ride` | A ride: a modal wash, a stick ping and a tick, 6 s | the ping's and the wash's levels |
 | `bell` | A ride bell: struck sine partials over modes, 3.5 s | `pitch` to a note, `stretch` |
 | `analog` | The drum-machine hat: six square oscillators through a band, 60 ms | `pitch`, the band, `stretch` |
+| `shaker` | One stroke: fine grains rattling 3 kHz a second over the shell's 3–12 kHz, beads clicking 300 a second over them, 220 ms | `grains_hz`, `grain_ms`, the shape for a slower or harder stroke |
+| `tambourine` | A headless tambourine: jingles (modes 110 Hz apart over 2.5–12 kHz) ringing from the strike, then shivering as they rattle down, and the hand's tap, 450 ms | the shiver's rate and level, `choke` |
 
 They are matched in loudness (−32.5 LUFS; the analog hat −33.1) and peak
 below −1 dBFS, so you can compare them fairly, and they share one output
@@ -138,6 +140,33 @@ The gate is 1 − chatter · shape · (1 − cos 2π·chatter_hz·t)/2, so it fo
 the source's own shape and is gone where the shape is. 100–300 Hz is plates
 slapping (an open or half-open hat); at 4 kHz it becomes a roughness. It
 sounds through drive and the damper like the rest of the source.
+
+### Rattle
+
+`grains_hz` above 0 turns a source into a rattle: it sounds only at a stream
+of collisions, as a shaker's beads or a tambourine's jingles, and what rings
+at each one is the source itself, its band, modes or partials.
+
+- `grains_hz` is how many collisions a second at the shape's peak. They thin
+  out with the shape, so a shake that dies away clicks ever more sparsely.
+- `grain_ms` is how long each one rings, down 60 dB: a few milliseconds for
+  beads on a shell, tens of milliseconds for jingles.
+- The shape is the gesture: one shake, a push and a pull, or a tambourine's
+  hit and shiver. The collisions change with every take, as every shake does.
+- Sources with the same `grains_hz` share their collisions, so a
+  tambourine's jingles (modes) and head (a sine tone) are struck together.
+- At the shape's peak a rattle is as loud as the source would be, at any
+  rate; below it, fewer collisions make it fall away faster than the shape.
+  At most 64 collisions may ring at once; past that it sounds as the plain
+  source.
+
+| Starting point | Source | `grains_hz` | `grain_ms` |
+|---|---|---|---|
+| Shaker | noise, 3–9 kHz, spacing 0, damping 0 | 500–1000 | 3–8 |
+| Maraca | noise, 2–7 kHz | 200–400 | 3–5 |
+| Cabasa | noise, 4–16 kHz | 1500–3000 | 1–2 |
+| Tambourine jingles | modes, 2.5–12 kHz, spacing 100–150 Hz | 100–300 | 50–120 |
+| Sizzle on a cymbal | a second source on the cymbal's modes | 200–400 | 10–30 |
 
 ### Damper
 
@@ -366,5 +395,6 @@ have been checked in sfizz and liquidsfz (VALIDATION.md).
   and dynamics are velocity layers.
 - Sounds defined by processing or storage: rooms and reverb, filtering after
   the fact, and the 6-bit cymbal samples of machines such as the TR-909.
-- Rivet and sizzle cymbals, whose rattle is impulsive, and FM or wavetable
-  metallics, though coherent sources can approach them.
+- FM or wavetable metallics, though coherent sources can approach them.
+  Rivet and sizzle cymbals have no reference yet, though a rattle on a
+  cymbal's modes approaches them.

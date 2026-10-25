@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "brightwork-synth"  # the command is brightwork
 version = "0.1.0"
-description = "A one-voice hi-hat and cymbal synthesizer that renders a text patch to a sampler-ready WAV"
+description = "A one-voice hi-hat, cymbal and shaker synthesizer that renders a text patch to a sampler-ready WAV"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 authors = [{ name = "Vittorio Candolo" }]
-keywords = ["audio", "synthesizer", "drum", "cymbal", "hi-hat", "sfz"]
+keywords = ["audio", "synthesizer", "drum", "cymbal", "hi-hat", "shaker", "tambourine", "sfz"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

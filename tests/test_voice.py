@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from numpy.typing import ArrayLike, NDArray
 
-from brightwork_synth import carrier, spectrum, voice
+from brightwork_synth import carrier, rattle, spectrum, voice
 from brightwork_synth.curve import Curve, amplitude_curve, mapped
 from brightwork_synth.patch import Noise, Patch, Tone, loads
 
@@ -84,6 +84,9 @@ def x_exact(p: Patch, times: ArrayLike | None = None, samples: ArrayLike | None 
             carrier_t = np.cos(2 * np.pi * cycles + np.angle(a)) @ np.abs(a)
             total += mapped(e, float(r), float(c))(t) * carrier_t
         gate = 1 - s.chatter * e(t) * (1 - np.cos(2 * np.pi * s.chatter_hz * t)) / 2
+        g = rattle.grains(e, s.grains_hz, s.grain_ms, p.seed, p.take)
+        if g is not None:  # R summed collision by collision
+            gate = gate * sum((a * g.beta(t - t0) for t0, a in zip(g.onsets, g.amps, strict=True)), np.zeros_like(t))
         x += 10 ** (s.level_db / 20) * gate * damper * total
     return x
 
@@ -142,6 +145,7 @@ VARIANTS: list[dict[str, object]] = [
     {"noise[1].damping": 1.2, "noise[1].bloom": 0.6, "noise[1].chatter": 0.7, "noise[1].chatter_hz": 310.0},
     {"noise[1].spacing_hz": 0.0, "noise[2].spacing_hz": 3.5, "damper.amp": amp((40, 1), (45, 0.2), (60, 0))},
     {"noise[1].amp": amp((2.5, 0), (3.0, 1), (40, 0.3), (110, 0)), "take": 9, "seed": 2**63 - 1},
+    {"noise[1].grains_hz": 900.0, "noise[1].grain_ms": 4.0, "noise[2].grains_hz": 900.0, "noise[2].chatter": 0.5},
 ]
 
 
@@ -177,15 +181,16 @@ def test_tones_are_the_model(edits: dict[str, object]) -> None:
 
 
 def test_blocks_threads_and_longer_renders_never_change_samples() -> None:
-    """Synthesize on one thread or several, or shorter, and find the same samples bit for bit."""
-    p = make(**VARIANTS[1])
-    v = voice.voice(p)
-    tabs = voice.tables(v, IP.rate)
-    count = voice.sample_count(v.t_src, RATE)
-    whole = voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count)
-    assert np.array_equal(voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count, workers=1), whole)
-    short = voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count // 3, workers=3)
-    assert np.array_equal(short, whole[: count // 3])
+    """Synthesize on one thread or several, or shorter, and find the same samples bit for bit, rattles included."""
+    for edits in (VARIANTS[1], VARIANTS[-1]):
+        p = make(**edits)
+        v = voice.voice(p)
+        tabs = voice.tables(v, IP.rate)
+        count = voice.sample_count(v.t_src, RATE)
+        whole = voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count)
+        assert np.array_equal(voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count, workers=1), whole)
+        short = voice.synthesize_x(voice.Model(v, IP, tabs), RATE, count // 3, workers=3)
+        assert np.array_equal(short, whole[: count // 3])
 
 
 def test_every_hit_starts_at_exactly_zero() -> None:
@@ -476,6 +481,16 @@ KINKY = {
 }
 
 
+RATTLING = {  # a few slow collisions, apart enough to measure each knot, over chatter and a damper
+    "noise[1].grains_hz": 60.0,
+    "noise[1].grain_ms": 6.0,
+    "noise[1].chatter": 0.4,
+    "noise[1].amp": amp((0, 0), (5, 1), (60, 0.5), (110, 0)),
+    "noise[2].level_db": -math.inf,
+    "damper.amp": amp((80, 1), (90, 0.3), (110, 0)),
+}
+
+
 def kinky_jumps(p: Patch) -> voice.Kinks:
     """Return every term's jumps at every knot of a patch."""
     v = voice.voice(p)
@@ -504,6 +519,27 @@ def test_every_jump_matches_the_model() -> None:
         assert got2 == pytest.approx(a2 - b2, abs=2e-3 * scale2), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
         assert got3 == pytest.approx(a3 - b3, abs=2e-3 * scale3), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
         np.testing.assert_allclose(k.x[rows], x_exact(p, np.full(rows.sum(), tau)), rtol=0, atol=1e-9)
+
+
+def test_every_collision_jump_matches_the_model() -> None:
+    """Find a rattle's jumps in x″ and x‴ at every collision's knots the model's one-sided derivatives."""
+    p = make(**RATTLING)
+    k = kinky_jumps(p)
+    times = np.unique(k.t[[path.endswith(".grains") for path in k.paths]])
+    assert times.size > JUMPS
+    every = np.unique(k.t)
+    for tau in times:
+        rows = k.t == tau
+        delta = min(2e-6, 0.25 * float(np.min(np.abs(every[every != tau] - tau))))
+
+        def f(t: Floats) -> Floats:
+            return x_exact(p, t)
+
+        b2, b3 = one_sided(f, tau, delta, -1)
+        a2, a3 = one_sided(f, tau, delta, +1)
+        got2, got3 = float(np.sum(k.d2[rows])), float(np.sum(k.d3[rows]))
+        assert got2 == pytest.approx(a2 - b2, abs=2e-3 * max(abs(a2), abs(b2), 1.0))
+        assert got3 == pytest.approx(a3 - b3, abs=2e-3 * max(abs(a3), abs(b3), 1e5))
 
 
 def test_jumps_through_the_saturator() -> None:

@@ -9,6 +9,8 @@ person; its state is recorded at the end.
 **Machine:** Intel Xeon @ 2.80 GHz, 4 cores, a virtual machine on which OpenBLAS selects its SkylakeX (AVX-512) kernels; Linux 6.18.
 **Software:** Python 3.11.15, NumPy 2.4.6 with OpenBLAS 0.3.31, SciPy 1.17.1, threadpoolctl 3.7.0, soundfile 0.14.0; sfizz 1.2.3 and liquidsfz 0.4.1, built from source.
 
+**Rattles.** When rattles joined the model (plan §2.12), the 32× grid, the drive-headroom brute force and the references by measurement were run again, on a Qualcomm Oryon, 12 cores, under WSL 2 (Linux 6.18), with Python 3.15.0, NumPy 2.5.4 and SciPy 1.18.1. Those sections give the new figures; the 16× grid and every other section are from the machine above.
+
 ## Numerical criteria (§8.1)
 
 Every criterion is a test in `tests/`. The *measured* column gives the value on
@@ -26,11 +28,12 @@ this machine.
 | Chatter | Modulation at f_c with depth d within 1%; none when d = 0 or the shape is 0 | The gated source equals the plain one times 1 − d(1 − cos 2πf_c t)/2 to 10⁻⁹; exactly the plain source at d = 0. |
 | Damper | Multiplies every source exactly; the file ends at its last knot | Exact to 10⁻¹³; earlier samples unchanged; the source length is the last knot. |
 | Drive | Identities | 0 dB is the identity; S(±1) = ±1 exactly; odd; small-signal gain 10^(drive/20) to 10⁻⁶; S′ and S″ match numerical derivatives. |
-| Dynamics | `softer` on every reference, 0–36 dB | Levels fall by exactly DB, rises lengthen by v^(−1/5), upper edges scale by v^(1/5), and `softer` composes within its written rounding, on all seven references; every reference takes the whole ladder. |
+| Dynamics | `softer` on every reference, 0–36 dB | Levels fall by exactly DB, rises lengthen by v^(−1/5), upper edges scale by v^(1/5), and `softer` composes within its written rounding, on all nine references; every reference takes the whole ladder. |
 | Decimators | Frozen coefficients | The snare's designs, bit for bit (table below). |
-| Kink bound | Never exceeded by the measured error on an undriven grid fixture | Never exceeded, with or without drive. On the 368 undriven fixtures it lies 6.7–57.6 dB above the measured error (median 19.6 dB), and on the 199 driven ones where it is at least twice the saturation term it is never exceeded either. |
-| Rendering accuracy | E_max and E_rel ≤ −100 dB for every fixture inside | All 593 fixtures inside at 32× pass, and all converged: the worst E_max is −111.4 dB and the worst E_rel −117.1 dB. |
-| Drive headroom | The report's value against full renders on every fixture; dense scans | Never optimistic beyond its 0.00001 dB resolution on the 882 fixtures whose status changes within 0–48 dB, and exact to 0.001 dB on 720; at most 0.195 dB conservative within 3 dB of the edge; right on all 67 that never change; no change of status between candidates in 293 dense scans. |
+| Kink bound | Never exceeded by the measured error on an undriven grid fixture | Never exceeded, with or without drive, rattles included. On the 458 undriven fixtures that measure an error it lies 6.7–60.2 dB above it (median 21.0 dB), and on the 211 driven ones where it is at least twice the saturation term it is never exceeded either. |
+| Rendering accuracy | E_max and E_rel ≤ −100 dB for every fixture inside | All 706 fixtures inside at 32× pass, and all converged: the worst E_max is −111.4 dB, and the worst rattle's −119.8 dB. |
+| Drive headroom | The report's value against full renders on every fixture; dense scans | Never optimistic beyond its 0.00001 dB resolution on the 1,080 fixtures whose status changes within 0–48 dB, and exact to 0.001 dB on 834; at most 0.438 dB conservative within 3 dB of the edge; right on all 81 that never change but one, where it is cautious; no change of status between candidates in 365 dense scans. |
+| Rattles | Collisions per take, thinned by the shape, at unit mean square at the peak; exact and fast evaluation | Over 200 takes the collisions in each stretch of a shake are its rate times the shape's area there, within 4σ; R's mean square is 1 within 0.1 where the shape is 1, and the thinned stream's where it is ½; a dense shake's energy varies by 0.2 dB (standard deviation) between takes, against 0.8 dB for a Poisson stream; the run-summed evaluation equals the collisions summed one by one within 10⁻¹³, however the samples are split; every collision's jumps in x″ and x‴ match the model's one-sided derivatives. |
 | Loudness | EBU Tech 3341, mono and stereo, every rate; K-weighting | The 48 kHz coefficients match BS.1770's to 10⁻¹⁴, the other rates match its response within 0.03 dB. The −23 dBFS 1 kHz sine in both channels reads −22.99 to −23.01 LUFS at all four rates; one channel alone reads 3.01 dB lower, and a second, different channel adds its energy. |
 | Export | Independent readers, mono and stereo; each file carries its patch and gains | soundfile, `scipy.io.wavfile`, Python's `wave` and an independent chunk walker read identical samples and headers, float and PCM, mono and stereo. A stereo file's channels equal its takes' mono renders; each channel of a PCM pair is dithered with its own take. Each file's `cymb` chunk holds the first take's patch and the file's gains, and its samples follow from them. |
 | Kits | The SFZ mapping, parsed back and played | Every key, velocity 1–127 and take maps to exactly one existing file; the level, measured from the files, follows 40·log₁₀(v/127) within 0.01 dB, never stepping more than one velocity step across a boundary; chokes as declared; a kit re-renders byte-identically. Two players load it (below). |
@@ -84,21 +87,23 @@ internal signal to 10⁻¹⁴. It decimates with `upfirdn`, apart from the
 shipping path's matrix products; the two agree within 9·10⁻¹⁷ of full scale,
 far below every error measured here.
 
-- 840 of the 949 grid references converged, with a median agreement of
-  −212 dB.
-- The 512 × base check (24.6 MHz) on 95 fixtures agreed at least as well as
+- 1,025 of the 1,161 grid references at 32× converged, with a median
+  agreement of −200 dB.
+- The 512 × base check (24.6 MHz) on 116 fixtures agreed at least as well as
   the 128/256 pair in every case.
-- The 109 unconverged references all have at least 12 dB of drive and are
+- The 136 unconverged references all have at least 10.6 dB of drive and are
   extreme corners: noise under 36–48 dB of drive or at +24 dB under 24 dB,
   four layers at +24 dB and the louder crossfades, every export rate under
-  36 dB, one 50 µs tick at +12 dB under 24 dB, and 31 random draws. Their
-  saturated signal still aliases at 12.3 MHz. The rule puts none of them
-  inside: the closest is 70.4 dB outside.
+  36 dB, one 50 µs tick at +12 dB under 24 dB, 26 rattles under 12–24 dB and
+  32 random draws. Their saturated signal still aliases at 12.3 MHz. The rule
+  puts none of them inside: the closest is 70.4 dB outside.
 
 ## The adversarial grid (§8.3)
 
-`tools/grid.py` builds 949 fixtures from combined corners, not one knob at a
-time, and runs each at 16× and 32× (`docs/grid/k16.csv`, `docs/grid/k32.csv`).
+`tools/grid.py` builds 1,161 fixtures from combined corners, not one knob at a
+time, and runs each at 32× (`docs/grid/k32.csv`). The 16× run
+(`docs/grid/k16.csv`) is the record of the 949 fixtures before rattles, which
+chose K.
 
 | Family | Fixtures | Covers |
 |---|---|---|
@@ -109,27 +114,33 @@ time, and runs each at 16× and 32× (`docs/grid/k16.csv`, `docs/grid/k32.csv`).
 | tones | 33 | square banks at the analog frequencies and eight times higher, through three bands, × drive 0–36 dB; struck sine partials to 19.5 kHz with 10–50 µs rises × drive 0–24 dB |
 | chokes | 16 | `choke` at 50 and 300 ms with releases of 1–100 ms over a ringing source × drive 0 and 24 dB |
 | layers | 13 | four coherent overlapping sources at +24 dB × drive 0–48 dB; crossfades between spacings and bands at 0 and +12 dB |
-| dynamics | 49 | `softer` ladders of 0–36 dB from every reference |
+| dynamics | 63 | `softer` ladders of 0–36 dB from every reference |
+| rattles | 198 | collision rates 20–4,000 a second × rings of 1–200 ms over a shaker's shell, a tambourine's jingles and the whole band × level and drive, where at most 64 collisions ring at once; a tambourine of jingles and a head sharing their collisions, under chatter, × drive 0–24 dB |
 | seeds | 90 | six representative fixtures across seeds 1–4 × takes 1–4 |
 | rates | 18 | 44.1, 88.2 and 96 kHz exports × drive 0–36 dB, plain and +6 dB |
-| random | 220 | the whole valid domain |
+| random | 220 | the whole valid domain; three sources in ten rattle |
 | longest | 6 | 8 s rides and crashes of three sources at 96 kHz × drive 0–24 dB |
 
 ### Results
 
-Each column applies its own refit constant: 0.85 at 16× and 0.36 at 32×.
+Each column applies its own refit constant: 0.85 at 16× and 0.36 at 32×. The
+16× column is the 949 fixtures before rattles; the 32× column, all 1,161.
 
 | | 16× | 32× |
 |---|---|---|
-| Pass (E ≤ −100 dB) | 529 | 661 |
-| Converged references | 840 | 840 |
-| Inside the validated domain | 410 | 593 |
+| Pass (E ≤ −100 dB) | 529 | 786 |
+| Converged references | 840 | 1,025 |
+| Inside the validated domain | 410 | 706 |
 | Inside and failing or unconverged | **0** | **0** |
 | Worst error inside | −110.4 dB | −111.4 dB |
-| Undriven fixtures passing | 358 of 368 | 367 of 368 |
+| Undriven fixtures passing | 358 of 368 | 459 of 460 |
 | Kink bound exceeded | never | never |
 | Saturation constant for 6 dB of margin | 0.849 | 0.356 |
-| Outside but passing (the rule's caution) | 119 | 68 |
+| Outside but passing (the rule's caution) | 119 | 80 |
+
+Rattles leave the rule as it was: the constant that covers every converged
+fixture with 6 dB of margin is still 0.356, and no rattle comes closer to its
+kink bound than 11.7 dB.
 
 Per family at 32×:
 
@@ -142,21 +153,25 @@ Per family at 32×:
 | tones | 33 | 24 | 28 | 0 | −113.8 dB |
 | chokes | 16 | 8 | 8 | 0 | −203.8 dB |
 | layers | 13 | 4 | 4 | 7 | −154.5 dB |
-| dynamics | 49 | 49 | 49 | 0 | −136.3 dB |
+| dynamics | 63 | 63 | 63 | 0 | −136.3 dB |
+| rattles | 198 | 102 | 115 | 26 | −119.8 dB |
 | seeds | 90 | 59 | 70 | 0 | −112.3 dB |
 | rates | 18 | 6 | 6 | 6 | −152.5 dB |
-| random | 220 | 164 | 170 | 31 | −113.7 dB |
+| random | 220 | 161 | 166 | 32 | −113.7 dB |
 | longest | 6 | 5 | 5 | 0 | −134.2 dB |
 
 The worst error inside is a 1 Hz-wide band at 0 dB under 24 dB of drive. The
-grid took about 0.9 CPU-hours at each K, a median of 0.4 s per fixture and at
-most 80 s at 32× (91 s at 16×), for 8 s of noise blooming at 3 from 6 kHz.
+32× grid took 1.8 CPU-hours, a median of 0.8 s per fixture and at most 159 s,
+for 8 s of noise blooming at 1 from 300 Hz.
 
 ### The kink bound
 
 No grid fixture, undriven or driven, measures more than its kink bound, so
-the rule gains no term. On the 368 undriven fixtures the bound lies 6.7–57.6
-dB above the measured error, median 19.6 dB. The one undriven fixture that
+the rule gains no term, and a rattle's collisions, every knot of every one a
+kink, need none either. On the 458 undriven fixtures that measure an error
+the bound lies 6.7–60.2 dB above it, median 21.0 dB. It adds every knot's
+share, while the error of collisions far apart in time never adds up, so on
+dense rattles it is cautious: a shaker's lies 35 dB above its error. The one undriven fixture that
 fails at 32×, a random draw at −92.1 dB, is outside by the kink bound alone.
 Inside the domain, the prediction is never closer than 3.8 dB to the measured
 error, on a struck sine with a 10 µs rise under 24 dB of drive. At 16× ten
@@ -172,18 +187,20 @@ is a full render from it: saturator, decimator, output peak, the knee slew
 measured directly and the kink bound. The search starts at the fixture's own
 drive and stops at the first change of status, whose bracket is bisected with
 full renders to 0.00001 dB. On fixtures whose edge is within 6 dB, it also
-scans every 0.05 dB up to the edge. In all, 949 fixtures and 67,960 full
+scans every 0.05 dB up to the edge. In all, 1,161 fixtures and 79,836 full
 renders:
 
-- **Never optimistic.** On the 882 fixtures whose status changes within
+- **Never optimistic.** On the 1,080 fixtures whose status changes within
   0–48 dB, the report is at most 0.00001 dB beyond the brute force, its
-  resolution. It is exact to 0.001 dB on 720, conservative by 0.001–0.1 dB on
-  119, by 0.1–1 dB on 28 and by 1–2.75 dB on 15.
-- **Exact where it matters.** Within 3 dB of the edge (160 fixtures) it is at
-  most 0.195 dB conservative.
+  resolution. It is exact to 0.001 dB on 834, conservative by 0.001–0.1 dB on
+  180, by 0.1–1 dB on 45 and by 1–3.4 dB on 21.
+- **Exact where it matters.** Within 3 dB of the edge (195 fixtures) it is at
+  most 0.438 dB conservative.
 - **No change of status left.** Where full renders never change status within
-  0–48 dB (67 fixtures), the report says so on all 67.
-- **No islands missed.** The 293 dense scans found no change of status
+  0–48 dB (81 fixtures), the report says so on 78, reports nothing for the 2
+  that are silent, and on the shaker struck 18 dB softer places an edge at
+  48.0 dB that full renders never reach.
+- **No islands missed.** The 365 dense scans found no change of status
   between the candidates.
 
 The largest gaps are on square banks and other fixtures where the kink bound
@@ -222,13 +239,17 @@ its own output settings.
 | ride | −32.5 | −32.5 | 0.63 dB | −13.17 dBFS | all | 26.3 dB | 35.3 dB |
 | bell | −32.5 | −32.5 | 0.07 dB | −18.87 dBFS | all | 34.1 dB | 47.7 dB |
 | analog | −33.3 | −33.1 | 1.49 dB | −1.43 dBFS | all | 6.2 dB | 11.3 dB |
+| shaker | −32.6 | −32.6 | 1.29 dB | −6.60 dBFS | all | 12.2 dB | 23.9 dB |
+| tambourine | −32.4 | −32.5 | 1.94 dB | −11.49 dBFS | all | 34.1 dB | 33.4 dB |
 
 The spread is the largest over the four seeds of the loudness range across a
 seed's eight takes. The means span 0.60 dB. Every take peaks below −1 dBFS
 and is inside with at least 3 dB of drive headroom. The closed hat's seeds 1
-and 4 and every seed of the pedal and analog hats spread over 1 dB (1.07–1.90
-dB); the report flags each of those sets, and `--level-match` brings each to
-one loudness within 0.0001 dB.
+and 4, every seed of the pedal and analog hats and of the shaker, and three of
+the tambourine's spread over 1 dB (up to 1.94 dB); the report flags each of
+those sets, and `--level-match` brings each to one loudness within 0.0001 dB.
+The seven hats and cymbals measure here as on the machine above, to the
+digit.
 
 Voicing by measurement set the levels and left the timbres as drafted,
 pending listening:
@@ -236,7 +257,7 @@ pending listening:
 - **Loudness.** The references are matched at −32.5 LUFS (the analog hat
   −33.1), through their source levels, so they share one output setting
   (−6 dB gain) and combine into any kit. The analog hat binds the target: a
-  60 ms hit of square partials has the highest crest of the seven.
+  60 ms hit of square partials has the highest crest of the references.
 - **Pitch room.** The bell's tone and tick bands now stop at 100 Hz and
   16 kHz, and the analog hat's band is 6–16.5 kHz, so `pitch` moves them from
   −12 to +3 semitones and `softer` takes their whole 36 dB ladder; a band edge
@@ -260,6 +281,7 @@ reference:
 | The damper | Open hat closed at 250 ms by `choke`: silent 47 ms later | 297 ms | 1.3 s |
 | Square tones | Analog hat: energy in its band | +27.7 dB | sines |
 | Stereo pairs | Crash: correlation between the channels | −0.03 | 1 (mono) |
+| Rattle | Shaker, 10–100 ms, takes 1–4: standard deviation of the 2 ms envelope over the 20 ms one (higher is more granular) | 0.44 (collisions) | 0.12 (the plain sources) |
 
 Whether each control earns its place is a listening judgement (§8.4). The
 usability tasks below show that each is reachable in a few edits.
@@ -273,7 +295,10 @@ add stick and make a ghost note; shorten, half-open, close on a beat and
 darken the open hat; shorten and darken the pedal; lengthen, darken the tail
 of, add bloom to and choke the crash, and make a splash and a china from it;
 add ping and wash to the ride and darken it; retune and shorten the bell; open
-the analog hat, turn it into its cymbal, retune and darken it. All pass.
+the analog hat, turn it into its cymbal, retune and darken it; loosen,
+smooth, lengthen and brighten the shaker; shake the tambourine longer, choke
+it and thin its shiver. All pass. A rattle's grain is measured as the
+fluctuation of its 2 ms envelope about its 20 ms one, over four takes.
 
 Three recipes taught something. A darker band alone lengthens a cymbal's
 measured decay, because what remains is its slow low end, so the splash and
@@ -286,34 +311,40 @@ plates.
 
 `tools/neighbourhoods.py` moves one control at a time on each reference's
 main source (the hats' plates, the crash's modes, the ride's wash, the bell's
-partials and the analog hat's squares), everything else as the reference has
+partials, the analog hat's squares, the shaker's grains and the tambourine's
+shiver), everything else as the reference has
 it, and renders every value over seeds 1–4 × takes 1–4. Spacing, damping,
 bloom and chatter are scanned over their whole valid ranges, damping and
 bloom in steps of 0.25 and chatter in steps of 0.1. The low band edge runs
 from three octaves below to three above in half octaves, the high edge from
 two below to one above in quarter octaves, and the tail length, by `stretch`,
-from 0.25 to 4 times in steps of √2. A control's extent is the run of values
+from 0.25 to 4 times in steps of √2. On a source that rattles, the collision
+rate runs from 23 to 2,900 a second and the ring from 1 to 256 ms, both in
+steps of √2. A control's extent is the run of values
 around the reference's own at which all 16 renders are inside. An end in
 italics is where the patch refuses the next value, an end in bold is where
 the next value is outside the validated domain, and any other end is the
 scan's. Drive is each reference's smallest drive headroom over seeds 1–4 ×
 takes 1–8 (above).
 
-| Reference | Low band edge | High band edge | Spacing | Damping | Bloom | Chatter | Tail length | Drive |
-|---|---|---|---|---|---|---|---|---|
-| closed | 750 Hz – *12 kHz* | *6.7* – *19 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | 0.25 – 4× | 0 – 24.3 dB |
-| open | 625 Hz – *14.1 kHz* | *5.7* – *19 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | 0.25 – 4× | 0 – 34.1 dB |
-| pedal | 312 Hz – *10 kHz* | 3 – *17 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | 0.25 – 4× | 0 – 26.1 dB |
-| crash | 50 Hz – 3.2 kHz | 4.5 – *18 kHz* | 0 – 200 Hz | 0 – *1.75* | 0 – *1.75* | 0 – 1 | 0.25 – *1.41×* | 0 – 32.1 dB |
-| ride | 62.5 Hz – 4 kHz | 4 – *19 kHz* | 0 – 200 Hz | 0 – *1.75* | 0 – *1.75* | 0 – 1 | 0.25 – *1×* | 0 – 35.3 dB |
-| bell | *25* – 800 Hz | 4 – *19 kHz* | | 0 – *2* | 0 – *2* | 0 – 1 | 0.25 – *2×* | 0 – 47.7 dB |
-| analog | 750 Hz – *12 kHz* | *6.9* – *19.6 kHz* | | 0 – **2.5** | 0 – 3 | 0 – 1 | 0.25 – 4× | 0 – 11.3 dB |
+| Reference | Low band edge | High band edge | Spacing | Damping | Bloom | Chatter | Collisions a second | Ring | Tail length | Drive |
+|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 750 Hz – *12 kHz* | *6.7* – *19 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | | | 0.25 – 4× | 0 – 24.3 dB |
+| open | 625 Hz – *14.1 kHz* | *5.7* – *19 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | | | 0.25 – 4× | 0 – 34.1 dB |
+| pedal | 312 Hz – *10 kHz* | 3 – *17 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | | | 0.25 – 4× | 0 – 26.1 dB |
+| crash | 50 Hz – 3.2 kHz | 4.5 – *18 kHz* | 0 – 200 Hz | 0 – *1.75* | 0 – *1.75* | 0 – 1 | | | 0.25 – *1.41×* | 0 – 32.1 dB |
+| ride | 62.5 Hz – 4 kHz | 4 – *19 kHz* | 0 – 200 Hz | 0 – *1.75* | 0 – *1.75* | 0 – 1 | | | 0.25 – *1×* | 0 – 35.3 dB |
+| bell | *25* – 800 Hz | 4 – *19 kHz* | | 0 – *2* | 0 – *2* | 0 – 1 | | | 0.25 – *2×* | 0 – 47.7 dB |
+| analog | 750 Hz – *12 kHz* | *6.9* – *19.6 kHz* | | 0 – **2.5** | 0 – 3 | 0 – 1 | | | 0.25 – 4× | 0 – 11.3 dB |
+| shaker | 375 Hz – *8.5 kHz* | *3.6* – *17 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | 23 – 3,000 | 1 – *16 ms* | 0.25 – 4× | 0 – 23.9 dB |
+| tambourine | 312 Hz – *10 kHz* | 3 – *17 kHz* | 0 – 200 Hz | 0 – 3 | 0 – 3 | 0 – 1 | 23 – *1,024* | 1 – *128 ms* | 0.25 – 4× | 0 – 33.4 dB |
 
 The patch refuses a low edge at or above the high edge, an edge beyond
 20 Hz–20 kHz, damping or bloom that compresses or stretches 20 kHz more than
-1000 times, and a sound that would end after 8 s. Tones have no spacing.
+1000 times, more than 64 collisions ringing at once, and a sound that would
+end after 8 s. Tones have no spacing.
 
-In all seven neighbourhoods the validated domain bounds a single control: the
+In all nine neighbourhoods the validated domain bounds a single control: the
 analog hat's damping. At 2.5 its smallest margin is 1.3 dB, and from 2.75 the
 kinks alone exceed the limit, because the upper sub-bands of its 20 µs square
 onsets then decay up to 16 times faster after the peak, which sharpens the
@@ -384,7 +415,7 @@ and the headroom check's results are identical.
 Not yet done; it needs a person. The references are voiced by measurement
 only. Recorded so far: the references, their kits from `softer`, their
 usability tasks and their validated neighbourhoods, all by measurement. Open:
-approval of the seven references by ear, across seeds 1–4 × takes 1–8; the
+approval of the nine references by ear, across seeds 1–4 × takes 1–8; the
 four-layer kits in patterns with accents; 16th-note hats with eight takes
 against one; closed–open patterns with chokes; the stereo crash and its mono
 sum; blind, level-matched comparisons; and the sample-replacement benchmark

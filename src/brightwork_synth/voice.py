@@ -30,6 +30,7 @@ from scipy.optimize import brentq
 from . import carrier, spectrum
 from .curve import Curve, amplitude_curve, mapped
 from .patch import Noise, Patch, Tone
+from .rattle import Grains, grains
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -84,9 +85,10 @@ class Source:
     kind: str  # "noise", "modes" or "tone"
     spec: NoiseSpec | ToneSpec  # what the lines are made of; the tables' common key
     gain: float  # g_j; 0 when silent
-    shape: Curve  # e_j, which the chatter gate follows
+    shape: Curve  # e_j, which the chatter gate and the collisions follow
     chatter: float
     chatter_hz: float
+    grains: Grains | None  # the take's collisions; None when the source does not rattle
     layout: spectrum.Layout
     subbands: tuple[SubBand, ...]  # empty when silent
 
@@ -193,7 +195,10 @@ def voice(p: Patch) -> Voice:
                 )
                 for b, (c, r) in enumerate(zip(lay.compression(s.damping), lay.stretch(s.bloom), strict=True))
             )
-        sources.append(Source(path, kind, spec, gain, shape, float(s.chatter), float(s.chatter_hz), lay, subbands))
+        collisions = grains(shape, float(s.grains_hz), float(s.grain_ms), p.seed, p.take) if gain else None
+        sources.append(
+            Source(path, kind, spec, gain, shape, float(s.chatter), float(s.chatter_hz), collisions, lay, subbands),
+        )
     damper = _shape(p.damper.amp) if p.damper.amp else None
     return Voice(p.seed, p.take, tuple(sources), damper, drive_alpha(p.drive.db), p.length_ms / 1000)
 
@@ -250,12 +255,29 @@ def sample_span(t0: float, t1: float, rate: int, count: int) -> tuple[int, int]:
     return a, max(a, b)
 
 
-def _gate(s: Source, t: Floats) -> Floats:
-    """Return G_j(t) = 1 − d e_j(t) (1 − cos 2π f_c t) / 2."""
-    if not s.chatter:
-        return np.ones_like(t)
-    gate: Floats = 1.0 - s.chatter * s.shape.on(t) * 0.5 * (1.0 - np.cos(TWO_PI * s.chatter_hz * t))
-    return gate
+def gate(s: Source, n0: int, n1: int, rate: int) -> Floats:
+    """Return G_j(n / rate) for n0 ≤ n < n1: the chatter gate 1 − d e_j (1 − cos 2π f_c t) / 2, times R if any."""
+    t = np.arange(n0, n1) / rate
+    out = np.ones_like(t)
+    if s.chatter:
+        out = 1.0 - s.chatter * s.shape.on(t) * 0.5 * (1.0 - np.cos(TWO_PI * s.chatter_hz * t))
+    if s.grains is not None:
+        out = out * s.grains.on_grid(n0, n1, rate)
+    return out
+
+
+def gates(s: Source, t: Floats) -> tuple[Pair, Pair]:
+    """Return the chatter gate and R, each with its derivative, at ascending times: 1 and 0 where absent."""
+    if s.chatter:
+        kappa = 0.5 * (1.0 - np.cos(TWO_PI * s.chatter_hz * t))
+        dkappa = 0.5 * TWO_PI * s.chatter_hz * np.sin(TWO_PI * s.chatter_hz * t)
+        ej, dej = s.shape(t), s.shape.derivative(t)
+        chatter = (1.0 - s.chatter * ej * kappa, -s.chatter * (dej * kappa + ej * dkappa))
+    else:
+        chatter = (np.ones_like(t), np.zeros_like(t))
+    if s.grains is None:
+        return chatter, (np.ones_like(t), np.zeros_like(t))
+    return chatter, (s.grains.value(t), s.grains.derivative(t))
 
 
 def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None) -> Floats:
@@ -291,7 +313,7 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
                     if a < b:
                         c = carrier.block(tab, ip, b0)
                         acc[a - n0 : b - n0] += sb.env.on(t[a - n0 : b - n0]) * c[a - b0 : b - b0]
-                factor = s.gain * _gate(s, t)
+                factor = s.gain * gate(s, n0, n1, rate)
                 if v.damper is not None:
                     factor = factor * v.damper.on(t)
                 x[n0:n1] += factor * acc
@@ -454,6 +476,8 @@ class Part:
     gate: Pair  # (G, G′)
     sum: Pair  # (W, W′): its sub-bands' envelopes times their carriers, summed
     bands: list[Band]  # each sub-band's (e, e′, c, c′)
+    chatter: Pair  # the chatter gate and its derivative: G is it times R
+    rattle: Pair  # (R, R′)
 
 
 @dataclass(frozen=True)
@@ -485,16 +509,11 @@ def state(v: Voice, times: ArrayLike, ip: carrier.Interpolator, tabs: Tables) ->
             w += e * c
             dw += de * c + e * dc
             bands.append((e, de, c, dc))
-        if s.chatter:
-            kappa = 0.5 * (1.0 - np.cos(TWO_PI * s.chatter_hz * t))
-            dkappa = 0.5 * TWO_PI * s.chatter_hz * np.sin(TWO_PI * s.chatter_hz * t)
-            ej, dej = s.shape(t), s.shape.derivative(t)
-            g, dg = 1.0 - s.chatter * ej * kappa, -s.chatter * (dej * kappa + ej * dkappa)
-        else:
-            g, dg = np.ones_like(t), np.zeros_like(t)
+        (c_g, dc_g), (r, dr) = gates(s, t)
+        g, dg = c_g * r, dc_g * r + c_g * dr
         x += s.gain * d * g * w
         dx += s.gain * ((dd * g + d * dg) * w + d * g * dw)
-        parts[s.path] = Part((g, dg), (w, dw), bands)
+        parts[s.path] = Part((g, dg), (w, dw), bands, (c_g, dc_g), (r, dr))
     return State(x, dx, (d, dd), parts)
 
 
@@ -523,9 +542,10 @@ def _no_kinks() -> Kinks:
 
 
 def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables) -> Kinks:
-    """Return every term's jumps at every knot (plan §5): sub-band shapes, the chatter gate and the damper."""
+    """Return every term's jumps at every knot (plan §5): sub-band shapes, the gates and the damper."""
     times = [sb.env.t for s in v.audible for sb in s.subbands]
     times += [s.shape.t for s in v.audible if s.chatter]
+    times += [s.grains.knots()[0] for s in v.audible if s.grains is not None]
     if v.damper is not None:
         times.append(v.damper.t)
     if not times:
@@ -568,7 +588,7 @@ def _index(where: dict[float, int], knots: Floats) -> NDArray[np.intp]:
 
 
 def _source_kinks(s: Source, st: State, where: dict[float, int], grid: Floats) -> list[Row]:
-    """Return one source's rows: its sub-band envelopes' jumps, then its chatter gate's."""
+    """Return one source's rows: its sub-band envelopes' jumps, then its chatter gate's, then its collisions'."""
     d, dd = st.damper
     part = st.sources[s.path]
     g, dg = part.gate
@@ -586,11 +606,26 @@ def _source_kinks(s: Source, st: State, where: dict[float, int], grid: Floats) -
         kappa = 0.5 * (1.0 - np.cos(TWO_PI * s.chatter_hz * tk))
         dkappa = 0.5 * TWO_PI * s.chatter_hz * np.sin(TWO_PI * s.chatter_hz * tk)
         e2, e3 = s.shape.jumps()
-        g2, g3 = -s.chatter * kappa * e2, -s.chatter * (kappa * e3 + 3 * dkappa * e2)
-        w, dw = part.sum
-        f, df = s.gain * d[idx] * w[idx], s.gain * (dd[idx] * w[idx] + d[idx] * dw[idx])
+        c2, c3 = -s.chatter * kappa * e2, -s.chatter * (kappa * e3 + 3 * dkappa * e2)
+        r, dr = part.rattle[0][idx], part.rattle[1][idx]
+        g2, g3 = r * c2, r * c3 + 3 * dr * c2  # the whole gate's jumps: the chatter gate's, times R
+        f, df = _riding(s, st, idx)
         rows += _rows(where, names, s.shape.t, f * g2, f * g3 + 3 * g2 * df)
+    if s.grains is not None:
+        knots, r2, r3 = s.grains.knots()
+        idx = _index(where, knots)
+        cg, dcg = part.chatter[0][idx], part.chatter[1][idx]
+        g2, g3 = cg * r2, cg * r3 + 3 * dcg * r2  # the whole gate's jumps: R's, times the chatter gate
+        f, df = _riding(s, st, idx)
+        rows += _rows(where, [f"{s.path}.grains"] * knots.size, knots, f * g2, f * g3 + 3 * g2 * df)
     return rows
+
+
+def _riding(s: Source, st: State, idx: NDArray[np.intp]) -> Pair:
+    """Return what a jump in a source's gate multiplies at the knots idx, g D W, and its derivative."""
+    d, dd = st.damper
+    w, dw = st.sources[s.path].sum
+    return s.gain * d[idx] * w[idx], s.gain * (dd[idx] * w[idx] + d[idx] * dw[idx])
 
 
 def _damper_kinks(v: Voice, damper: Curve, st: State, where: dict[float, int]) -> list[Row]:

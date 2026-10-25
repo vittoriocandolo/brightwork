@@ -69,6 +69,8 @@ def test_example_parses() -> None:
         0.0,
         0.0,
         220.0,
+        0.0,
+        10.0,
         ((0.0, 0.0), (0.3, 1.0), (8.0, 0.45), (30.0, 0.14), (70.0, 0.04), (120.0, 0.0)),
     )
     assert p.damper == patch.Damper(())
@@ -101,6 +103,8 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
             "bloom": float(rng.choice([0.0, rng.uniform(0, min(0.5, top))])),
             "chatter": float(rng.uniform(0, 1)),
             "chatter_hz": float(rng.uniform(10, 4000)),
+            "grains_hz": float(rng.choice([0.0, rng.uniform(1, 600)])),
+            "grain_ms": float(rng.uniform(1, 100)),
             "amp": random_shape(rng, int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1500),
         }
 

@@ -29,6 +29,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING
 
+from brightwork_synth import carrier
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict
 from brightwork_synth.render import domain, synthesize
@@ -49,13 +50,16 @@ STEPS = {
     "bloom": [i / 4 for i in range(13)],
     "chatter": [i / 10 for i in range(11)],
     "spacing_hz": [0.0, 1.0, 2.0, 4.0, 7.0, 10.0, 14.0, 20.0, 28.0, 40.0, 56.0, 80.0, 113.0, 160.0, 200.0],
+    "grains_hz": [2.0 ** (k / 2) for k in range(9, 24)],  # 23 to 2,900 collisions a second
+    "grain_ms": [2.0 ** (k / 2) for k in range(17)],  # 1 to 256 ms
 }
 OCTAVES = {"low": [2 ** (k / 2) for k in range(-6, 7)], "high": [2 ** (k / 4) for k in range(-8, 5)]}
 LENGTHS = [2 ** (k / 2) for k in range(-4, 5)]  # tail length, by `stretch` of every shape after its peak
-CONTROLS = ("band low", "band high", "spacing_hz", "damping", "bloom", "chatter", "length")
+CONTROLS = ("band low", "band high", "spacing_hz", "damping", "bloom", "chatter", "grains_hz", "grain_ms", "length")
+RATTLE = ("grains_hz", "grain_ms")  # scanned only on a source that rattles
 
 
-MAIN = {"bell": "tone[1]", "analog": "tone[1]"}  # the others' main source is noise[1]
+MAIN = {"bell": "tone[1]", "analog": "tone[1]", "tambourine": "noise[2]"}  # the others' is noise[1]
 
 
 def main_source(name: str) -> str:
@@ -65,15 +69,16 @@ def main_source(name: str) -> str:
 
 def candidates(name: str, control: str) -> tuple[list[float], float]:
     """Return the values scanned along a control, and the reference's own."""
-    kind = main_source(name)[:-3]
-    src = to_dict(loads(reference_text(name)))[kind][0]
+    path = main_source(name)
+    kind = path[:-3]
+    src = to_dict(loads(reference_text(name)))[kind][int(path[-2]) - 1]
     if control == "length":
         return LENGTHS, 1.0
     if control.startswith("band"):
         lo, hi = src["band_hz"]
         own = lo if control == "band low" else hi
         return [round(own * f, 1) for f in OCTAVES[control.split()[1]]], own
-    if control == "spacing_hz" and kind == "tone":
+    if (control == "spacing_hz" and kind == "tone") or (control in RATTLE and not src["grains_hz"]):
         return [], math.nan
     own = float(src[control])
     return sorted(set(STEPS[control]) | {own}), own
@@ -88,7 +93,7 @@ def moved(name: str, control: str, value: float) -> Patch | None:
         d = to_dict(p)
         path = main_source(name)
         if control.startswith("band"):
-            lo, hi = d[path[:-3]][0]["band_hz"]
+            lo, hi = d[path[:-3]][int(path[-2]) - 1]["band_hz"]
             band = [value, hi] if control == "band low" else [lo, value]
             set_path(d, f"{path}.band_hz", band)
         else:
@@ -141,7 +146,7 @@ def measure(seeds: int, takes: int, workers: int) -> dict[tuple[str, str], Exten
             scans[(name, control)] = (values, own)
             jobs += [(name, control, v, s, t) for v in values for s in range(1, seeds + 1) for t in range(1, takes + 1)]
     found: dict[tuple[str, str, float], list[bool | None]] = {}
-    with ProcessPoolExecutor(workers) as pool:
+    with ProcessPoolExecutor(workers, initializer=carrier.share_cores, initargs=(workers,)) as pool:
         for (name, control, value, _, _), inside in pool.map(status, jobs, chunksize=4):
             found.setdefault((name, control, value), []).append(inside)
     out = {}

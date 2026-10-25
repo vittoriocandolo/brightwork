@@ -56,6 +56,7 @@ STRIKE_KEY = b"cymbal/strike/v1"
 NOISE_KEY = b"cymbal/noise/v1"
 PHASE_KEY = b"cymbal/phase/v1"
 DITHER_KEY = b"cymbal/dither/v1"
+GRAINS_KEY = b"cymbal/grains/v1"
 
 MAX_SEED = 2**63 - 1
 MAX_TAKE = 2**31
@@ -119,6 +120,17 @@ def free_phases(seed: int, take: int, tone: int, count: int) -> Floats:
     """Return uniform phases for the partials of tone `tone`, numbered from 1."""
     _check(seed, take)
     return 2.0 * np.pi * _stream(PHASE_KEY, seed, take, tone, words=count).astype(float) * 2.0**-53
+
+
+@functools.lru_cache(maxsize=32)
+def grain_draws(seed: int, take: int, count: int) -> tuple[Floats, Floats]:
+    """Return the first `count` collisions' draws, read-only: each one's place in its cell, and its keeping uniform.
+
+    Both are uniform on [0, 1), one word each; the stream is prefix-stable.
+    """
+    _check(seed, take)
+    words = _stream(GRAINS_KEY, seed, take, words=2 * count).reshape(count, 2).astype(float) * 2.0**-53
+    return _readonly(np.ascontiguousarray(words[:, 0])), _readonly(np.ascontiguousarray(words[:, 1]))
 
 
 def dither(seed: int, take: int, count: int) -> Floats:

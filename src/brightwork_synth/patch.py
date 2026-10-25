@@ -44,6 +44,9 @@ SAMPLE_RATES = (44100, 48000, 88200, 96000)
 FORMATS = ("float32", "pcm24", "pcm16")
 WAVES = ("sine", "square")
 PHASES = ("strike", "free")
+MAX_GRAINS_HZ = 4000.0  # collisions per second
+MIN_GRAIN_MS, MAX_GRAIN_MS = 1.0, 1000.0  # how long a collision rings
+MAX_OVERLAP = 64.0  # collisions ringing at once, at the shape's peak
 MODES = ("gain", "peak", "true-peak")  # the output's: a gain, or a sample or true peak target at or below full scale
 MAX_MS = 8000.0  # every carrier repeats after 8 s
 MAX_NOISE = 4
@@ -75,6 +78,8 @@ class Noise:
     bloom: float
     chatter: float
     chatter_hz: float
+    grains_hz: float  # 0: no rattle
+    grain_ms: float
     amp: Knots  # ((ms, gain), ...)
 
     @property
@@ -96,6 +101,8 @@ class Tone:
     bloom: float
     chatter: float
     chatter_hz: float
+    grains_hz: float
+    grain_ms: float
     amp: Knots
 
     @property
@@ -349,12 +356,20 @@ def _validate_take(take: object, problems: _Problems) -> None:
 
 
 def _validate_common(s: Noise | Tone, path: str, f_ref: float | None, problems: _Problems) -> None:
-    """Check level, damping, bloom, chatter and shape, and the sub-bands they imply."""
+    """Check level, damping, bloom, chatter, rattle and shape, and the sub-bands they imply."""
     problems.number(f"{path}.level_db", s.level_db, -90.0, 24.0, silence=True)
     damping = problems.number(f"{path}.damping", s.damping, 0.0, 3.0)
     bloom = problems.number(f"{path}.bloom", s.bloom, 0.0, 3.0)
     problems.number(f"{path}.chatter", s.chatter, 0.0, 1.0)
     problems.number(f"{path}.chatter_hz", s.chatter_hz, 10.0, 4000.0)
+    rate = problems.number(f"{path}.grains_hz", s.grains_hz, 0.0, MAX_GRAINS_HZ)
+    ring = problems.number(f"{path}.grain_ms", s.grain_ms, MIN_GRAIN_MS, MAX_GRAIN_MS)
+    if rate is not None and ring is not None and rate * ring / 1000 > MAX_OVERLAP:
+        problems.add(
+            f"{path}.grains_hz",
+            f"{rate:g} collisions per second ringing {ring:g} ms each overlap {rate * ring / 1000:.4g} at once; "
+            f"at most {MAX_OVERLAP:g}, past which a rattle sounds as the plain source",
+        )
     amp = problems.shape(f"{path}.amp", s.amp)
     if f_ref is None or damping is None or bloom is None:
         return
@@ -454,10 +469,10 @@ def _validate_output(o: object, problems: _Problems) -> None:
 
 # Parsing.
 
-_COMMON = ("band_hz", "damping", "bloom", "chatter", "chatter_hz", "amp")
+_COMMON = ("band_hz", "damping", "bloom", "chatter", "chatter_hz", "grains_hz", "grain_ms", "amp")
 _FIELDS = {
     "": ("instrument", "schema", "seed", "take", "noise", "tone", "damper", "drive", "output"),
-    "noise": ("level_db", "band_hz", "spacing_hz", "damping", "bloom", "chatter", "chatter_hz", "amp"),
+    "noise": ("level_db", "band_hz", "spacing_hz", *_COMMON[1:]),
     "tone": ("level_db", "wave", "phase", "partials", *_COMMON),
     "damper": ("amp",),
     "drive": ("db",),
@@ -538,6 +553,8 @@ def _noise(problems: _Problems, path: str, table: object) -> Noise | None:
         _float(t["bloom"]),
         _float(t["chatter"]),
         _float(t["chatter_hz"]),
+        _float(t["grains_hz"]),
+        _float(t["grain_ms"]),
         amp,
     )
 
@@ -561,6 +578,8 @@ def _tone(problems: _Problems, path: str, table: object) -> Tone | None:
         _float(t["bloom"]),
         _float(t["chatter"]),
         _float(t["chatter_hz"]),
+        _float(t["grains_hz"]),
+        _float(t["grain_ms"]),
         amp,
     )
 
@@ -684,6 +703,8 @@ def to_dict(p: Patch) -> dict[str, Any]:
                 "bloom": s.bloom,
                 "chatter": s.chatter,
                 "chatter_hz": s.chatter_hz,
+                "grains_hz": s.grains_hz,
+                "grain_ms": s.grain_ms,
                 "amp": _knots_dict(s.amp),
             }
             for s in p.noise
@@ -700,6 +721,8 @@ def to_dict(p: Patch) -> dict[str, Any]:
                 "bloom": s.bloom,
                 "chatter": s.chatter,
                 "chatter_hz": s.chatter_hz,
+                "grains_hz": s.grains_hz,
+                "grain_ms": s.grain_ms,
                 "amp": _knots_dict(s.amp),
             }
             for s in p.tone
@@ -778,12 +801,14 @@ def dumps(p: Patch) -> str:
 
 
 def _common_rows(s: Noise | Tone) -> list[Row]:
-    """Return the rows every source has: damping, bloom and chatter."""
+    """Return the rows every source has: damping, bloom, chatter and rattle."""
     return [
         ("damping", _f(s.damping), "content at f decays (f / f_ref)^damping times faster"),
         ("bloom", _f(s.bloom), "and rises (f / f_ref)^bloom times slower"),
         ("chatter", _f(s.chatter), "0 … 1: gated at chatter_hz, as plates that slap"),
         ("chatter_hz", _f(s.chatter_hz), ""),
+        ("grains_hz", _f(s.grains_hz), "collisions per second at the shape's peak, a rattle; 0 = none"),
+        ("grain_ms", _f(s.grain_ms), "each collision rings down 60 dB in this time"),
     ]
 
 
