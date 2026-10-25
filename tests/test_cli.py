@@ -41,7 +41,7 @@ def run(capsys: pytest.CaptureFixture[str], *args: object) -> tuple[int, str, st
 def example(tmp_path: Path) -> Path:
     """Write the plan's example patch to a file."""
     path = tmp_path / "hat.toml"
-    path.write_text(EXAMPLE)
+    path.write_text(EXAMPLE, encoding="utf-8")
     return path
 
 
@@ -113,7 +113,7 @@ def test_render_writes_stereo_pairs(capsys: pytest.CaptureFixture[str], tmp_path
 def test_render_refuses_overs_unless_allowed(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     """Refuse to write a render over full scale, saying what to lower, unless --allow-over writes float32."""
     patch = tmp_path / "loud.toml"
-    patch.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"))
+    patch.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"), encoding="utf-8")
     out = tmp_path / "loud.wav"
     code, _, err = run(capsys, "render", patch, "--out", out)
     assert code == REFUSED
@@ -129,20 +129,21 @@ def test_render_writes_pcm(capsys: pytest.CaptureFixture[str], tmp_path: Path) -
     """Render 24- and 16-bit PCM, refuse --allow-over for it, and refuse a render over its ceiling."""
     for fmt, subtype in (("pcm24", "PCM_24"), ("pcm16", "PCM_16")):
         patch = tmp_path / f"{fmt}.toml"
-        patch.write_text(EXAMPLE.replace('"float32"     #', f'"{fmt}"       #'))
-        assert loads(patch.read_text()).output.format == fmt
+        patch.write_text(EXAMPLE.replace('"float32"     #', f'"{fmt}"       #'), encoding="utf-8")
+        assert loads(patch.read_text(encoding="utf-8")).output.format == fmt
         out = tmp_path / f"{fmt}.wav"
         code, text, _ = run(capsys, "render", patch, "--out", out)
         assert code == 0
         assert f"{fmt[3:]}-bit PCM" in text
         assert soundfile.info(out).subtype == subtype
-        assert loads(run(capsys, "extract", out)[1]) == loads(patch.read_text())
+        assert loads(run(capsys, "extract", out)[1]) == loads(patch.read_text(encoding="utf-8"))
         code, _, err = run(capsys, "render", patch, "--out", tmp_path / "x.wav", "--allow-over")
         assert code == BAD_INPUT
         assert "float32 only" in err
     loud = tmp_path / "loud.toml"
     loud.write_text(
         EXAMPLE.replace('"float32"     #', '"pcm24"       #').replace("db          = -6.0", "db          = 12.0"),
+        encoding="utf-8",
     )
     code, _, err = run(capsys, "render", loud, "--out", tmp_path / "loud.wav")
     assert code == REFUSED
@@ -154,7 +155,10 @@ def test_render_writes_pcm(capsys: pytest.CaptureFixture[str], tmp_path: Path) -
 def test_errors_are_reported(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     """Report an invalid patch's every problem, a missing file, and a WAV without a patch or not a WAV at all."""
     bad = tmp_path / "bad.toml"
-    bad.write_text(EXAMPLE.replace("damping    = 0.5", "damping    = 4.0").replace("seed = 1 ", "seed = -1 "))
+    bad.write_text(
+        EXAMPLE.replace("damping    = 0.5", "damping    = 4.0").replace("seed = 1 ", "seed = -1 "),
+        encoding="utf-8",
+    )
     code, _, err = run(capsys, "render", bad, "--out", tmp_path / "x.wav")
     assert code == BAD_INPUT
     assert "noise[1].damping: 4 is outside 0 … 3" in err
@@ -171,15 +175,15 @@ def test_errors_are_reported(capsys: pytest.CaptureFixture[str], tmp_path: Path)
     assert code == BAD_INPUT
     assert "nothing.wav" in err
     text = tmp_path / "text.wav"
-    text.write_text("not a wave")
+    text.write_text("not a wave", encoding="utf-8")
     assert run(capsys, "extract", text) == (BAD_INPUT, "", f"{text}: not a RIFF WAVE file\n")
 
 
 def test_pitch(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     """Pitch a patch by semitones or to a note, and refuse a word or a pitch that leaves the valid domain."""
     analog = tmp_path / "analog.toml"
-    analog.write_text(cli.reference_text("analog"))
-    p = loads(analog.read_text())
+    analog.write_text(cli.reference_text("analog"), encoding="utf-8")
+    p = loads(analog.read_text(encoding="utf-8"))
     code, out, _ = run(capsys, "pitch", analog, "-2")
     assert code == 0
     assert out == dumps(loads(out))
@@ -244,7 +248,7 @@ def test_softer(capsys: pytest.CaptureFixture[str], example: Path, tmp_path: Pat
     assert "is outside" in err
     # Softer layers compose: 6 then 6 is 12, up to the decimal rounding it writes.
     six = tmp_path / "six.toml"
-    six.write_text(run(capsys, "softer", example, 6)[1])
+    six.write_text(run(capsys, "softer", example, 6)[1], encoding="utf-8")
     twice = loads(run(capsys, "softer", six, 6)[1])
     assert [s.level_db for _, s in twice.sources] == [s.level_db for _, s in q.sources]
     assert abs(twice.noise[0].band_hz[1] - q.noise[0].band_hz[1]) <= COMPOSED_HZ
@@ -284,7 +288,10 @@ def test_verify(capsys: pytest.CaptureFixture[str], example: Path) -> None:
     assert "take 2" in out
     assert "2 of 2 takes pass" in out
     hot = example.with_name("hot.toml")
-    hot.write_text(EXAMPLE.replace("level_db   = -2.0", "level_db   = 6.0").replace("db = 0.0 ", "db = 24.0 "))
+    hot.write_text(
+        EXAMPLE.replace("level_db   = -2.0", "level_db   = 6.0").replace("db = 0.0 ", "db = 24.0 "),
+        encoding="utf-8",
+    )
     code, out, _ = run(capsys, "verify", hot)
     assert code == REFUSED
     assert "FAIL" in out
@@ -308,7 +315,7 @@ def test_audition_arguments(capsys: pytest.CaptureFixture[str], example: Path, m
 
     monkeypatch.setattr(audition, "device_stream", stream)
     other = example.with_name("open.toml")
-    other.write_text(cli.reference_text("open"))
+    other.write_text(cli.reference_text("open"), encoding="utf-8")
     args = ["audition", example, other, "--bpm", "120", "--every", "1/8", "--pattern", "1,1,2,0", "--choke", "2:1"]
     code, _, _ = run(capsys, *args, "--release", "30", "--stereo", "--takes", "2")
     assert code == 0

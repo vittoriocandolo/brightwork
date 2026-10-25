@@ -112,7 +112,7 @@ class Decimator:
 
 def manifest() -> dict[str, Any]:
     """Read the frozen decimators' manifest: each one's file, taps, checksum and stopband."""
-    text = resources.files("brightwork_synth").joinpath("data", "decimators.json").read_text()
+    text = resources.files("brightwork_synth").joinpath("data", "decimators.json").read_text(encoding="utf-8")
     data: dict[str, Any] = json.loads(text)
     return data
 

@@ -313,7 +313,7 @@ def write_wav(path: Path, data: ArrayLike, rate: int, subtype: str = "FLOAT") ->
 def example(tmp_path: Path) -> Path:
     """Write the plan's example patch to a file."""
     path = tmp_path / "hat.toml"
-    path.write_text(EXAMPLE)
+    path.write_text(EXAMPLE, encoding="utf-8")
     return path
 
 
@@ -332,7 +332,7 @@ def said(log: list[str], generation: int) -> bool:
 
 def edit(path: Path, text: str) -> None:
     """Write new text to a patch file, bumping its time so the change is seen within one clock tick."""
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     st = path.stat()
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
 
@@ -354,7 +354,7 @@ def test_pcm_patches_play_their_quantized_samples(tmp_path: Path) -> None:
     """Play a PCM patch's dithered samples, as `render` writes them."""
     path = tmp_path / "pcm.toml"
     text = EXAMPLE.replace('"float32"     #', '"pcm16"       #')
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     audio, _ = render(loads(text))
     expected = quantize(audio, 16, 1, 1) / 2.0**15
     heard = audition.Session(path, out=Collect([])).hits.fill(20000)
@@ -378,7 +378,7 @@ def test_a_peak_mode_set_waits_for_all_its_takes(tmp_path: Path) -> None:
     """Wait for every take of a peak-mode set, whose gain depends on all of them."""
     path = tmp_path / "peak.toml"
     text = EXAMPLE.replace('mode        = "gain"', 'mode        = "peak"').replace("db          = -6.0", "db = -1.0")
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     audio, _ = render_takes(loads(text), 3)
     session = audition.Session(path, audition.Settings(takes=3), out=Collect([]))
     offer = session.hits.offered(0)
@@ -402,7 +402,7 @@ def test_stereo_sessions_play_take_pairs(example: Path) -> None:
 def test_several_patches_render_behind_the_first(tmp_path: Path, example: Path) -> None:
     """Render the other patches behind the first, each playing on its steps."""
     other = tmp_path / "other.toml"
-    other.write_text(OTHER)
+    other.write_text(OTHER, encoding="utf-8")
     first, _ = render(loads(EXAMPLE))
     second, _ = render(loads(OTHER))
     session = audition.Session(
@@ -420,14 +420,14 @@ def test_several_patches_render_behind_the_first(tmp_path: Path, example: Path) 
 def test_a_session_chokes_one_patch_with_another(tmp_path: Path, example: Path) -> None:
     """Choke one patch's hits with another's in a session."""
     ring = tmp_path / "open.toml"
-    ring.write_text(EXAMPLE.replace("{ ms = 120.0, gain = 0.0 }", "{ ms = 900.0, gain = 0.0 }"))
+    ring.write_text(EXAMPLE.replace("{ ms = 120.0, gain = 0.0 }", "{ ms = 900.0, gain = 0.0 }"), encoding="utf-8")
     session = audition.Session(
         [ring, example],
         audition.Settings(bpm=120.0, every=0.5, pattern=(1, 2), chokes=((1, (2,)),)),
         out=Collect([]),
     )
     wait_for(lambda: session.buffers[1])
-    long, _ = render(loads(ring.read_text()))
+    long, _ = render(loads(ring.read_text(encoding="utf-8")))
     hat, _ = render(loads(EXAMPLE))
     heard = np.concatenate([session.hits.fill(4800) for _ in range(10)])
     step = 12000
@@ -455,23 +455,23 @@ def test_audition_runs_until_interrupted_and_reports_what_it_cannot_play(example
     assert seen["channels"] == 1
     assert audition.audition([example], audition.Settings(stereo=True), stream_factory=Stream, out=Collect([])) == 0
     assert seen["channels"] == STEREO
-    example.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"))
+    example.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"), encoding="utf-8")
     assert audition.audition([example], stream_factory=Stream, out=Collect([])) == REFUSED  # over full scale
-    example.write_text(EXAMPLE.replace("damping    = 0.5", "damping    = 9.0"))
+    example.write_text(EXAMPLE.replace("damping    = 0.5", "damping    = 9.0"), encoding="utf-8")
     assert audition.audition([example], stream_factory=Stream, out=Collect([])) == BAD_INPUT  # invalid
 
     def unsupported(rate: int, _channels: int, _fill: audition.Fill) -> Stream:
         msg = f"the output device does not support {rate} Hz"
         raise RuntimeError(msg)
 
-    example.write_text(EXAMPLE)
+    example.write_text(EXAMPLE, encoding="utf-8")
     assert audition.audition([example], stream_factory=unsupported, out=Collect([])) == REFUSED
 
 
 def test_watcher_renders_only_the_newest_version(tmp_path: Path) -> None:
     """Render only the newest version of a file, dropping one superseded while it rendered."""
     path = tmp_path / "hat.toml"
-    path.write_text("v0")
+    path.write_text("v0", encoding="utf-8")
     gate = threading.Event()
     rendered: list[str] = []
     results: list[tuple[int, object, bool]] = []
@@ -488,7 +488,7 @@ def test_watcher_renders_only_the_newest_version(tmp_path: Path) -> None:
     w.poll()
     assert w.generation == 0  # unchanged content starts nothing
     for i in range(1, 5):
-        path.write_text(f"v{i}")
+        path.write_text(f"v{i}", encoding="utf-8")
         w.poll()
         time.sleep(0.05)
     gate.set()
@@ -674,7 +674,7 @@ def test_stereo_pcm_patches_dither_each_channel_with_its_take(tmp_path: Path) ->
     """Play a stereo PCM pair's dithered samples, each channel dithered as its own take."""
     path = tmp_path / "pcm.toml"
     text = EXAMPLE.replace('"float32"     #', '"pcm24"       #')
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     pair, _ = render_takes(loads(text), 1, stereo=True)
     expected = np.stack([quantize(pair[0][:, c], 24, 1, take) for c, take in enumerate((1, 2))], axis=1) / 2.0**23
     heard = audition.Session(path, audition.Settings(stereo=True), out=Collect([])).hits.fill(pair[0].shape[0])
@@ -695,7 +695,7 @@ def test_an_empty_offer_silences_its_slot() -> None:
 def test_a_watcher_waits_out_unreadable_files_and_stops_cleanly(tmp_path: Path) -> None:
     """Start nothing for an unchanged, missing or undecodable file, and drop a render finished after stopping."""
     path = tmp_path / "hat.toml"
-    path.write_text("v0")
+    path.write_text("v0", encoding="utf-8")
     gate, started = threading.Event(), threading.Event()
     results: list[int] = []
 
@@ -715,7 +715,7 @@ def test_a_watcher_waits_out_unreadable_files_and_stops_cleanly(tmp_path: Path) 
     path.unlink()
     w.poll()
     assert w.generation == 0
-    path.write_text("v1")
+    path.write_text("v1", encoding="utf-8")
     w.poll()
     started.wait(5)
     w.stop()

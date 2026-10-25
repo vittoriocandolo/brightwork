@@ -358,9 +358,10 @@ def _render(every: list[tuple[str, Patch]], options: Options, workers: int | Non
     jobs = [dataclasses.replace(p, take=t) for (_, p), ts in zip(every, numbers, strict=True) for t in ts]
     n = min(len(jobs), workers or os.cpu_count() or 1)
     if n > 1:
-        # Workers start from a fork server, never by forking the caller: a thread of the caller holding a lock,
-        # such as an audition watcher rendering, would otherwise leave a worker deadlocked on it.
-        with ProcessPoolExecutor(n, mp_context=multiprocessing.get_context("forkserver")) as pool:
+        # Workers start from a fork server, or fresh where there is none (Windows), never by forking the caller: a
+        # thread of the caller holding a lock, such as an audition watcher rendering, would leave a worker deadlocked.
+        method = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
+        with ProcessPoolExecutor(n, mp_context=multiprocessing.get_context(method)) as pool:
             done = list(pool.map(_synthesize, jobs, chunksize=1))
     else:
         done = [_synthesize(p) for p in jobs]
@@ -512,7 +513,7 @@ def write(kit: Kit, folder: str | os.PathLike[str]) -> list[Path]:
                 )
                 written.append(path)
     sfz = out_dir / f"{kit.stem}.sfz"
-    sfz.write_text(kit.sfz(), encoding="utf-8")
+    sfz.write_text(kit.sfz(), encoding="utf-8", newline="\n")  # the same bytes on every platform
     written.append(sfz)
     return written
 

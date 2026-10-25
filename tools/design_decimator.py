@@ -134,7 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 h.astype("<f8").tofile(DATA / f"decimator-{name}.f64")
     if not args.check:
-        (DATA / "decimators.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        (DATA / "decimators.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return status
 
 

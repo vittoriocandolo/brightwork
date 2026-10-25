@@ -110,7 +110,7 @@ def test_the_curve_puts_each_layer_on_the_square_law() -> None:
 def test_every_key_velocity_and_take_maps_to_exactly_one_file(written: Written) -> None:
     """Map every key, velocity and take to exactly one file of the kit, named so it maps by hand too."""
     out, files = written
-    text = sfz(out).read_text()
+    text = sfz(out).read_text(encoding="utf-8")
     rs = regions(text)
     assert len(rs) == (3 + 1 + 2) * 2
     assert all(r["pitch_keytrack"] == "0" and r["loop_mode"] == "one_shot" for r in rs)
@@ -134,7 +134,7 @@ def test_every_key_velocity_and_take_maps_to_exactly_one_file(written: Written) 
 def test_chokes_as_declared(written: Written) -> None:
     """Put the closed and pedal hats in one choke group, which turns the open hat off over 40 ms."""
     out, _ = written
-    rs = regions(sfz(out).read_text())
+    rs = regions(sfz(out).read_text(encoding="utf-8"))
     by_key = {k: [r for r in rs if r["key"] == str(k)] for k in (42, 44, 46)}
     groups = {r["group"] for k in (42, 44) for r in by_key[k]}
     assert len(groups) == 1  # the closed and pedal hats are one choke group
@@ -167,7 +167,7 @@ def test_choke_rules_are_checked() -> None:
 def test_the_level_follows_the_square_law_on_every_key(hats: pack.Kit, written: Written) -> None:
     """Measure every velocity's level from the files: on the square law, and within a step across boundaries."""
     out, _ = written
-    text = sfz(out).read_text()
+    text = sfz(out).read_text(encoding="utf-8")
     rate = hats.keys[0].layers[0].patch.output.sample_rate
     for key in (42, 46):
         groups = [ops for header, ops in parse_sfz(text) if header == "group" and ops["key"] == str(key)]
@@ -260,7 +260,7 @@ def test_a_stereo_kit_pairs_consecutive_takes(tmp_path: Path) -> None:
     data, _ = soundfile.read(tmp_path / layer.files(42)[1], dtype="float32")
     assert data.shape[1] == len(("left", "right"))
     assert meta_of(tmp_path / layer.files(42)[1])["takes"] == [3, 4]
-    assert "seq_length=2" in sfz(tmp_path).read_text()
+    assert "seq_length=2" in sfz(tmp_path).read_text(encoding="utf-8")
     assert len(files) == 2 * 2 + 1  # two layers of two files, and the mapping
 
 
@@ -297,7 +297,7 @@ def test_the_command_writes_a_kit(tmp_path: Path, capsys: pytest.CaptureFixture[
     paths = {}
     for name, p in ladder("closed", (0, 8)) + ladder("open", (0,)):
         paths[name] = tmp_path / f"{name}.toml"
-        paths[name].write_text(dumps(p))
+        paths[name].write_text(dumps(p), encoding="utf-8")
     out = tmp_path / "hats"
     args = ["pack", f"42={paths['closed']},{paths['closed-8']}", f"46={paths['open']}", "--choke", "46:42"]
     code = cli.main([*args, "--takes", "2", "--out", str(out)])
@@ -365,12 +365,15 @@ def test_the_command_refuses_what_it_cannot_read_or_fit(tmp_path: Path, capsys: 
     assert cli.main(["pack", f"42={missing}", "--out", str(out)]) == BAD_INPUT
     assert f"{missing}: No such file or directory" in capsys.readouterr().err
     invalid = tmp_path / "invalid.toml"
-    invalid.write_text('instrument = "cymbal"\n')
+    invalid.write_text('instrument = "cymbal"\n', encoding="utf-8")
     assert cli.main(["pack", f"42={invalid}", "--out", str(out)]) == BAD_INPUT
     assert f"{invalid}: invalid patch" in capsys.readouterr().err
     [(_, p)] = ladder("closed", (0,))
     loud = tmp_path / "loud.toml"
-    loud.write_text(dumps(dataclasses.replace(p, output=dataclasses.replace(p.output, mode="gain", db=24.0))))
+    loud.write_text(
+        dumps(dataclasses.replace(p, output=dataclasses.replace(p.output, mode="gain", db=24.0))),
+        encoding="utf-8",
+    )
     assert cli.main(["pack", f"42={loud}", "--out", str(out)]) == 1
     captured = capsys.readouterr()
     assert "velocities" in captured.out

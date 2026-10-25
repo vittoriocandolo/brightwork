@@ -139,7 +139,7 @@ def polyphase(taps: Floats, q: int, up: int) -> Floats:
 
 def manifest() -> dict[str, Any]:
     """Read the frozen interpolators' manifest: each one's file, taps, reach and checksum."""
-    text = resources.files("brightwork_synth").joinpath("data", "interpolators.json").read_text()
+    text = resources.files("brightwork_synth").joinpath("data", "interpolators.json").read_text(encoding="utf-8")
     data: dict[str, Any] = json.loads(text)
     return data
 

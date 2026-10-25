@@ -136,7 +136,7 @@ def play_liquidsfz(binary: str, sfz: Path, notes: Sequence[Note], out: Path) -> 
     lines = []
     for t, key, velocity, length in notes:
         lines += [f"{round(t * RATE)} {key} {velocity}", f"{round((t + length) * RATE)} {key} 0"]
-    (out / "notes.txt").write_text("\n".join(lines) + "\n")
+    (out / "notes.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     frames = round((max(t for t, *_ in notes) + 2.0) * RATE)
     subprocess.run(
         [binary, str(sfz), str(out / "notes.txt"), str(frames), str(RATE), str(out / "played.f32")],

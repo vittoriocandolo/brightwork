@@ -55,7 +55,7 @@ def rms(amps: NDArray[np.complex128]) -> float:
 
 def test_shipped_interpolators_are_the_design_and_match_their_checksums() -> None:
     """Find every shipped interpolator the design, to rounding, and its checksum, its error within 10⁻¹³."""
-    entries = json.loads((DATA / "interpolators.json").read_text())["filters"]
+    entries = json.loads((DATA / "interpolators.json").read_text(encoding="utf-8"))["filters"]
     assert set(entries) == {f"{b}x{k}" for b in (44100, 48000) for k in (16, 32, 64)}
     for e in entries.values():
         raw = (DATA / e["file"]).read_bytes()

@@ -128,7 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 taps.astype("<f8").tofile(DATA / f"interpolator-{name}.f64")
     if not args.check:
-        (DATA / "interpolators.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        (DATA / "interpolators.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return status
 
 
