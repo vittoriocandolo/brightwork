@@ -507,3 +507,11 @@ def test_quantization_refuses_what_its_format_cannot_hold() -> None:
     """Refuse audio at full scale, which the dither could carry past the largest PCM value."""
     with pytest.raises(render.RenderError, match="does not fit 16-bit PCM"):
         render.quantize(np.ones(64, dtype=np.float32), 16, 1, 1)
+
+
+def test_a_silent_set_reports_each_file_silent() -> None:
+    """Report every file of a silent set as silent, with nothing to say about its domain."""
+    text = str(render.render_takes(make(**SILENT), 2)[1])
+    assert "file 1   silent" in text
+    assert "file 2   silent" in text
+    assert "mostly" not in text

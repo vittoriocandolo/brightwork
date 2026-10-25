@@ -8,9 +8,8 @@ import math
 import numpy as np
 import pytest
 
-from brightwork_synth import carrier, reference, voice
+from brightwork_synth import carrier, reference, render, voice
 from brightwork_synth.patch import loads
-from brightwork_synth.render import synthesize
 
 from .conftest import EXAMPLE, make, make_tone
 
@@ -51,10 +50,11 @@ def test_the_reference_signal_is_the_shipping_model() -> None:
     tabs = voice.tables(v, ip.rate)
     count = voice.sample_count(v.t_src, rate)
     whole = voice.synthesize_x(voice.Model(v, ip, tabs), rate, count)
-    for n0, n1 in ((-100, 5000), (12345, 99999), (count - 3000, count + 700)):
+    for n0, n1 in ((-100, 5000), (12345, 99999), (count - 3000, count + 700), (-700, -100), (count + 10, count + 900)):
         got = reference.x_range(voice.Model(v, ip, tabs), rate, n0, n1, count)
         want = np.zeros(n1 - n0)
-        a, b = max(n0, 0), min(n1, count)
+        a = max(n0, 0)
+        b = max(min(n1, count), a)
         want[a - n0 : b - n0] = whole[a:b]
         np.testing.assert_allclose(got, want, rtol=0, atol=SHIPPING_ROUNDING)
 
@@ -94,7 +94,7 @@ def test_example_passes_with_a_converged_reference() -> None:
 def test_reference_is_aligned_with_the_shipping_output() -> None:
     """Align the reference with the shipping output, with no shift, its ringing dead within its guard."""
     p = make_tone()
-    ship = synthesize(p).out
+    ship = render.synthesize(p).out
     ref = reference.reference(p)
     assert ref.out.size == ship.size
     # Same time origin: no shift improves the match.
@@ -129,7 +129,7 @@ def test_kink_bound_is_an_upper_bound(rise_ms: float) -> None:
         },
     )
     v = reference.verify_take(p)
-    bound = synthesize(p).kink
+    bound = render.synthesize(p).kink
     assert v.error.max_abs <= bound
     assert v.error.max_abs >= bound / BOUND_USE  # and a useful one
 
@@ -148,7 +148,7 @@ def test_the_kink_bound_covers_mapped_knots_chatter_and_the_damper() -> None:
     )
     v = reference.verify_take(p)
     assert v.converged
-    assert v.error.max_abs <= synthesize(p).kink
+    assert v.error.max_abs <= render.synthesize(p).kink
 
 
 def test_verify_judges_every_take() -> None:
@@ -173,3 +173,23 @@ def test_compare() -> None:
     quiet = np.array([0.0, 1e-3, 0.0])
     assert reference.compare(quiet + 5e-8, quiet).passes()  # near-silent: the absolute bound applies
     assert not reference.compare(quiet + 5e-7, quiet).passes()
+
+
+def test_a_near_silent_take_is_judged_absolutely() -> None:
+    """Judge a take whose reference peaks below 1e-2 by the absolute bound, and say so."""
+    quiet = make(**{"noise[1].level_db": -50.0, "noise[2].level_db": -50.0, "output.db": 0.0})
+    v = reference.verify_take(quiet)
+    assert v.error.near_silent
+    assert v.passed
+    text = str(v)
+    assert "near-silent: limit 1e-07" in text
+    assert "agree to" in text
+
+
+def test_the_shipping_taps_given_explicitly_change_nothing() -> None:
+    """Render and reference alike whether the shipping decimator is given or looked up."""
+    p = loads(EXAMPLE)
+    taps = render.decimator(48000).taps
+    assert np.array_equal(render.synthesize(p, taps=taps).out, render.synthesize(p).out)
+    given = reference.reference(p, reference.REFERENCE, taps=taps)
+    assert np.array_equal(given.out, reference.reference(p, reference.REFERENCE).out)
