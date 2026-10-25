@@ -23,7 +23,6 @@ import dataclasses
 import functools
 import json
 import math
-import os
 import platform
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -54,6 +53,7 @@ from .voice import (
 )
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Sequence
 
     from numpy.typing import ArrayLike, NDArray
@@ -194,7 +194,7 @@ def decimate(
         return flat
 
     tasks = [(s, b) for s in range(streams) for b in range(-(-counts[s] // (per * phases)))]
-    with carrier.single_threaded(), ThreadPoolExecutor(min(workers or os.cpu_count() or 1, len(tasks))) as pool:
+    with carrier.single_threaded(), ThreadPoolExecutor(min(workers or carrier.threads(), len(tasks))) as pool:
         blocks = list(pool.map(block, tasks))
     out = np.empty(n_out)
     for s in range(streams):
@@ -335,7 +335,7 @@ def true_peak(y: Floats, taps: Floats, workers: int | None = None) -> float:
         return float(np.max(crests(w)[b0 - lo : b1 - lo]))
 
     starts = range(0, n, PEAK_BLOCK)
-    with ThreadPoolExecutor(min(workers or os.cpu_count() or 1, max(len(starts), 1))) as pool:
+    with ThreadPoolExecutor(min(workers or carrier.threads(), max(len(starts), 1))) as pool:
         return max(pool.map(block, starts), default=0.0)
 
 

@@ -144,6 +144,30 @@ def manifest() -> dict[str, Any]:
     return data
 
 
+class Cores:
+    """How many threads a render in this process may use: None for every core."""
+
+    share: int | None = None
+
+
+CORES = Cores()
+
+
+def threads() -> int:
+    """Return the threads a render may use: every core, or this process's share of them when several render."""
+    return CORES.share or os.cpu_count() or 1
+
+
+def share_cores(processes: int) -> None:
+    """Give this process its share of the cores while `processes` processes render at once, as a kit's workers do.
+
+    Each would otherwise start a thread per core, and its linear algebra library as many again, and so many more
+    threads than cores slow every one of them.
+    """
+    CORES.share = max(1, (os.cpu_count() or 1) // processes)
+    threadpool_limits(limits=CORES.share)  # for the rest of the process
+
+
 def load_taps(raw: bytes, entry: dict[str, Any], name: str) -> Floats:
     """Return a frozen filter's coefficients from their shipped bytes, refused unless they match the checksum."""
     if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
@@ -262,7 +286,7 @@ def tables(keys: Sequence[Key], rate: int, make: Callable[[int], Lines]) -> list
                 seen.add(k)
                 todo.append((k, *make(i)))
         if todo:
-            with ThreadPoolExecutor(max_workers=min(len(todo), os.cpu_count() or 1)) as pool:
+            with ThreadPoolExecutor(max_workers=min(len(todo), threads())) as pool:
                 for (k, _, _), row in zip(todo, pool.map(lambda r: table(r[1], r[2], rate), todo), strict=True):
                     row.flags.writeable = False
                     _CACHE[k] = row

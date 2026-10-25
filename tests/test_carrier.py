@@ -6,6 +6,7 @@
 import hashlib
 import json
 import math
+import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from threadpoolctl import threadpool_limits
+from threadpoolctl import threadpool_info, threadpool_limits
 
 from brightwork_synth import carrier, spectrum
 
@@ -218,3 +219,16 @@ def test_the_cache_drops_the_oldest_but_never_what_a_render_needs(monkeypatch: p
     assert len(carrier.tables(keys, rate, lambda _: a)) == len(keys)
     assert all(carrier.cached(k, rate) for k in keys)
     carrier.clear_cache()
+
+
+def test_a_kit_worker_takes_its_share_of_the_cores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use every core alone, and an even share of them, at least one, while several processes render."""
+    cores = 12
+    monkeypatch.setattr(carrier.CORES, "share", None)
+    monkeypatch.setattr(os, "cpu_count", lambda: cores)
+    assert carrier.threads() == cores
+    with threadpool_limits():  # restores the linear algebra library's threads afterwards
+        for processes, share in ((5, 2), (cores, 1), (2 * cores, 1)):
+            carrier.share_cores(processes)
+            assert carrier.threads() == share
+            assert all(pool["num_threads"] == share for pool in threadpool_info())

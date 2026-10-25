@@ -33,7 +33,6 @@ from __future__ import annotations
 import dataclasses
 import functools
 import math
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
@@ -151,7 +150,7 @@ def reference(
     ip = carrier.interpolator(base, multiple // 2)
     tabs = tables(v, ip.rate)
     n = sample_count(v.t_src, rate)
-    z = band_limited(Model(v, ip, tabs), rate, range(-GUARD, n + GUARD), multiple // k, workers or os.cpu_count() or 1)
+    z = band_limited(Model(v, ip, tabs), rate, range(-GUARD, n + GUARD), multiple // k, workers or carrier.threads())
     first = GUARD // factor  # GUARD is a multiple of every factor, so the output grid stays aligned
     out = upfirdn(taps, z, down=factor)[first : first + (n + taps.size - 2) // factor + 1]
     return Reference(out, z)

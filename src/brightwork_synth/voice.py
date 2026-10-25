@@ -20,7 +20,6 @@ knot, with x and x′ there.
 from __future__ import annotations
 
 import math
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
@@ -268,7 +267,7 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
     """
     v, ip, tabs = model
     x = np.zeros(count)
-    workers = workers or os.cpu_count() or 1
+    workers = workers or carrier.threads()
     with carrier.single_threaded(), ThreadPoolExecutor(workers) as pool:
         for s in v.audible:
             lo, hi = sample_span(s.start, s.end, rate, count)

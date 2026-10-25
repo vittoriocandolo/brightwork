@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, TextIO
 
 import numpy as np
 
-from . import __version__
+from . import __version__, carrier
 from .loudness import momentary_max
 from .patch import DEFAULT_RELEASE_MS, Patch, PatchError, load
 from .render import (
@@ -363,7 +363,8 @@ def _render(every: list[tuple[str, Patch]], options: Options, workers: int | Non
         # Workers start from a fork server, or fresh where there is none (Windows), never by forking the caller: a
         # thread of the caller holding a lock, such as an audition watcher rendering, would leave a worker deadlocked.
         method = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
-        with ProcessPoolExecutor(n, mp_context=multiprocessing.get_context(method)) as pool:
+        context = multiprocessing.get_context(method)
+        with ProcessPoolExecutor(n, mp_context=context, initializer=carrier.share_cores, initargs=(n,)) as pool:
             done = list(pool.map(_synthesize, jobs, chunksize=1))
     else:
         done = [_synthesize(p) for p in jobs]
