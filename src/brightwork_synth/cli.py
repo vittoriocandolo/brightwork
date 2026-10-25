@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import wav
+from . import __version__, wav
 from .audition import Settings, audition
 from .pack import Options, pack
 from .patch import DEFAULT_RELEASE_MS, Patch, PatchError, choke, dumps, load, loads, pitch, softer, stretch
@@ -360,6 +360,7 @@ def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the brightwork command, and return its exit status."""
     ap = argparse.ArgumentParser(prog="brightwork", description="A one-voice hi-hat and cymbal synthesizer.")
+    ap.add_argument("--version", action="version", version=f"brightwork {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     _render_commands(sub)
     _edit_commands(sub)

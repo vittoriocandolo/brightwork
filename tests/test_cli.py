@@ -16,7 +16,7 @@ import pytest
 import soundfile
 from numpy.typing import NDArray
 
-from brightwork_synth import audition, cli, wav
+from brightwork_synth import __version__, audition, cli, wav
 from brightwork_synth.patch import dumps, loads
 from brightwork_synth.render import render, render_takes
 
@@ -398,9 +398,9 @@ def test_python_dash_m_runs_the_command_line(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run the package as a module, as `python -m brightwork_synth init closed` does."""
-    monkeypatch.setattr(sys, "argv", ["brightwork", "init", "closed"])
+    """Run the package as a module, as `python -m brightwork_synth --version` does."""
+    monkeypatch.setattr(sys, "argv", ["brightwork", "--version"])
     with pytest.raises(SystemExit) as caught:
         runpy.run_module("brightwork_synth", run_name="__main__")
     assert caught.value.code == 0
-    assert capsys.readouterr().out == dumps(loads(cli.reference_text("closed")))
+    assert capsys.readouterr().out == f"brightwork {__version__}\n"
