@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Carriers: each sub-band's table at the table rate, interpolated to the internal rate (plan §2.3, §3).
 
 A sub-band's carrier is a line spectrum on the 1/8 Hz grid, so it is periodic

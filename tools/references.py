@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The seven references by measurement (plan §3, §8.4): seeds 1–4 × takes 1–8 at the shipping K.
 
 For each reference it reports the loudness and sample peak of every take,

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Vittorio Candolo
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
 // An offline renderer for liquidsfz, which ships only real-time clients, used by tests/test_sfz_player.py.
 //
 // Usage: liquidsfz_render SFZ EVENTS FRAMES RATE OUT

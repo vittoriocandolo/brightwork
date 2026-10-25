@@ -7,6 +7,8 @@ name = "brightwork-synth"  # the command is brightwork
 version = "0.1.0"
 description = "A one-voice hi-hat and cymbal synthesizer that renders a text patch to a sampler-ready WAV"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 authors = [{ name = "Vittorio Candolo" }]
 dependencies = ["numpy>=2.4", "scipy>=1.17", "threadpoolctl>=3.1"]

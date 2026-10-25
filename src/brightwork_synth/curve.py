@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Monotone cubic Hermite curves and their time maps (plan §2.2).
 
 A curve passes through its knots with slopes from the PCHIP rule:

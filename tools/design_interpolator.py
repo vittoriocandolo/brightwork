@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Design the frozen interpolators (plan §3) and write them to src/brightwork_synth/data.
 
 The renderer never designs its interpolators: it loads these coefficients and

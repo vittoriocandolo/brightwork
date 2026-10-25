@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The validated extent of every reference along each of its controls (plan §5, §8.4).
 
 The voiced regions are the references' neighbourhoods. Whether a sound in one

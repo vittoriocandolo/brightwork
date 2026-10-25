@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The sources, their sub-bands, chatter, the damper and the drive as pure functions of time (plan §2, §3, §5).
 
     x(t) = Σ_j g_j D(t) G_j(t) Σ_b e_j(τ_jb(t)) c_jb(t),    y(t) = S_α(x(t))

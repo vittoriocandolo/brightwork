@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Kits: articulations on keys, velocity layers with takes, chokes, and an SFZ mapping (plan §7.3).
 
 Each `KEY=PATCH[,PATCH…]` group is one articulation on one key; its patches

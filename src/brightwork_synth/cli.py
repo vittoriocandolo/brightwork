@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Command line (plan §7.6): brightwork init | render | verify | extract | audition | pack, and the editing commands
 pitch | stretch | choke | softer, which print a complete, canonical patch."""
 

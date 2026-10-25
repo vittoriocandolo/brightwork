@@ -24,3 +24,13 @@ brightwork pack 42=closed.toml 46=open.toml --choke 46:42 --takes 8 --out hats/
 This is an independent codebase. It carries over the designs and findings of
 the Kick Synth and the Snare/Clap Synth, which live on their own branches,
 not their code.
+
+## License
+
+Brightwork is free software, under the [GNU General Public License](LICENSE),
+version 3 or later.
+
+The sounds you make with it are yours. An additional permission in
+[NOTICE](NOTICE) lets you use the sounds Brightwork renders, the patches and
+SFZ maps it writes, and its reference patches under any terms you choose, in a
+track or in a sample pack you sell.

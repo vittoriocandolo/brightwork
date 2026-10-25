@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The spectral grid, its seeded streams, and every source's lines and sub-bands (plan §2.3–§2.6).
 
 Every source is a set of lines on one grid, f_k = k/8 Hz for k = 1 … 160,000,

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """A kit played by real SFZ players (plan §10, milestone 3): sfizz and liquidsfz.
 
 The test writes a kit, plays a list of notes through each player offline,
