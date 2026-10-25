@@ -23,15 +23,26 @@ import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from typing import TYPE_CHECKING, Any
 
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.loudness import momentary_max
 from brightwork_synth.patch import loads
 from brightwork_synth.render import cause_of, db, domain, drive_headroom, output_stage, render_takes, synthesize
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-def take_row(args) -> dict:
-    name, seed, take = args
+type Row = dict[str, Any]
+
+MATCHED_DB = 1.0  # the references' loudnesses lie within this of each other, and each set's takes too
+CEILING_DB = -1.0  # every peak lies below
+HEADROOM_DB = 3.0  # of drive headroom, at least, on every seed and take
+
+
+def take_row(job: tuple[str, int, int]) -> Row:
+    """Measure one take of a reference: its loudness, peak, domain and drive headroom."""
+    name, seed, take = job
     p = dataclasses.replace(loads(reference_text(name)), seed=seed, take=take)
     s = synthesize(p)
     d = domain(s)
@@ -50,7 +61,8 @@ def take_row(args) -> dict:
     }
 
 
-def summarize(name: str, rows: list[dict]) -> dict:
+def summarize(name: str, rows: list[Row]) -> Row:
+    """Summarize a reference over its seeds and takes: loudness, spreads, the worst peak, margin and headroom."""
     spreads = {}
     for seed in sorted({r["seed"] for r in rows}):
         values = [r["lufs"] for r in rows if r["seed"] == seed]
@@ -69,53 +81,61 @@ def summarize(name: str, rows: list[dict]) -> dict:
     }
 
 
-def measure(seeds: int, takes: int, workers: int) -> list[dict]:
+def measure(seeds: int, takes: int, workers: int) -> list[Row]:
+    """Measure every take of every reference, in parallel processes, and summarize each reference."""
     jobs = [(n, s, t) for n in REFERENCES for s in range(1, seeds + 1) for t in range(1, takes + 1)]
     with ProcessPoolExecutor(workers) as pool:
         rows = list(pool.map(take_row, jobs, chunksize=1))
     return [summarize(n, [r for r in rows if r["name"] == n]) for n in REFERENCES]
 
 
-def main(argv=None) -> int:
+def matched(results: list[Row], takes: int) -> set[str]:
+    """Return the references whose uneven sets the report flags and level matching brings within 1 dB."""
+    out = set()
+    for r in results:
+        p = loads(reference_text(r["name"]))
+        uneven = [s for s, spread in r["spreads"].items() if spread > MATCHED_DB]
+        fine = True
+        for s in uneven:
+            q = dataclasses.replace(p, seed=s)
+            fine &= render_takes(q, takes)[1].uneven
+            fine &= render_takes(q, takes, level_match=True)[1].loudness_spread <= MATCHED_DB
+        if uneven:
+            state = "flagged; within 1 dB with --level-match" if fine else "NOT handled"
+            sys.stdout.write(f"{r['name']}: seeds {', '.join(map(str, uneven))} spread over 1 dB, {state}\n")
+            if fine:
+                out.add(r["name"])
+    return out
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Measure the references, and say whether they meet the acceptance criteria."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", type=int, default=4)
     ap.add_argument("--takes", type=int, default=8)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     args = ap.parse_args(argv)
     results = measure(args.seeds, args.takes, args.workers)
-    print(f"seeds 1–{args.seeds} × takes 1–{args.takes}")
-    print(
+    out = sys.stdout
+    out.write(f"seeds 1–{args.seeds} × takes 1–{args.takes}\n")
+    out.write(
         f"{'reference':<9s} {'LUFS':>6s} {'mean':>6s} {'spread':>7s} {'max peak':>9s} {'inside':>7s} "
-        f"{'min margin':>11s} {'min headroom':>13s}",
+        f"{'min margin':>11s} {'min headroom':>13s}\n",
     )
     for r in results:
-        print(
+        out.write(
             f"{r['name']:<9s} {r['lufs']:6.1f} {r['mean']:6.1f} {r['spread']:5.2f}dB {r['peak']:7.2f}dB "
-            f"{r['inside']!s:>7s} {r['margin']:9.1f}dB {r['headroom']:11.1f}dB",
+            f"{r['inside']!s:>7s} {r['margin']:9.1f}dB {r['headroom']:11.1f}dB\n",
         )
     means = [r["mean"] for r in results]
-    # A set whose takes spread over 1 dB must be flagged by the report, and level matching must bring it within 1 dB.
-    matched = set()
-    for r in results:
-        p = loads(reference_text(r["name"]))
-        uneven = [s for s, spread in r["spreads"].items() if spread > 1.0]
-        fine = True
-        for s in uneven:
-            q = dataclasses.replace(p, seed=s)
-            fine &= render_takes(q, args.takes)[1].uneven
-            fine &= render_takes(q, args.takes, level_match=True)[1].loudness_spread <= 1.0
-        if uneven:
-            state = "flagged; within 1 dB with --level-match" if fine else "NOT handled"
-            print(f"{r['name']}: seeds {', '.join(map(str, uneven))} spread over 1 dB, {state}")
-            if fine:
-                matched.add(r["name"])
+    levelled = matched(results, args.takes)
     ok = (
-        max(means) - min(means) <= 1.0
-        and all(r["peak"] < -1.0 for r in results)
-        and all(r["inside"] and r["headroom"] >= 3.0 for r in results)
-        and all(r["spread"] <= 1.0 or r["name"] in matched for r in results)
+        max(means) - min(means) <= MATCHED_DB
+        and all(r["peak"] < CEILING_DB for r in results)
+        and all(r["inside"] and r["headroom"] >= HEADROOM_DB for r in results)
+        and all(r["spread"] <= MATCHED_DB or r["name"] in levelled for r in results)
     )
-    print(f"loudness range {max(means) - min(means):.2f} dB; {'all criteria met' if ok else 'criteria NOT met'}")
+    out.write(f"loudness range {max(means) - min(means):.2f} dB; {'all criteria met' if ok else 'criteria NOT met'}\n")
     return 0 if ok else 1
 
 

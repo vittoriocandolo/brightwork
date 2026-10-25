@@ -33,12 +33,13 @@ SETS = {  # name: (files, stereo)
 
 
 def main() -> int:
+    """Render every golden set again, and write its files over the recorded ones."""
     for name, (files, stereo) in SETS.items():
         p = loads((GOLDEN / f"{name}.toml").read_text(encoding="utf-8"))
         audio, report = render_takes(p, files, stereo=stereo)
-        for a, f in zip(audio, report.files):
+        for a, f in zip(audio, report.files, strict=True):
             export(GOLDEN / f"{name}_{f.number}.wav", a, p, report, f)
-        print(f"{name}: {len(audio)} file(s) of {audio[0].shape} at {p.output.sample_rate} Hz")
+        sys.stdout.write(f"{name}: {len(audio)} file(s) of {audio[0].shape} at {p.output.sample_rate} Hz\n")
     return 0
 
 

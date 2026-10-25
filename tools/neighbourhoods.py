@@ -13,7 +13,7 @@ of those renders is inside the validated domain. Each end of the run says what
 stops it: the validated domain (outside), the valid domain (the patch refuses
 the value), or the end of the scan. Tail length is `stretch` of every shape
 after its peak. Drive is not scanned: every reference renders without drive,
-and its extent is the smallest drive headroom that tools/references.py
+and its extent is the smallest drive headroom that tools.references
 reports over all its takes, which is exact or cautious.
 
     uv run python -m tools.neighbourhoods [--seeds 4] [--takes 4]
@@ -27,11 +27,22 @@ import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from typing import TYPE_CHECKING
 
 from brightwork_synth.cli import REFERENCES, reference_text
 from brightwork_synth.patch import PatchError, from_dict, loads, stretch, to_dict
 from brightwork_synth.render import domain, synthesize
 from tools.grid import set_path
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from brightwork_synth.patch import Patch
+
+type Job = tuple[str, str, float, int, int]  # reference, control, value, seed, take
+type Extent = tuple[float | None, float | None, str, str]  # low, high, and what stops each end
+
+KILO = 1000.0
 
 STEPS = {
     "damping": [i / 4 for i in range(13)],
@@ -48,11 +59,12 @@ MAIN = {"bell": "tone[1]", "analog": "tone[1]"}  # the others' main source is no
 
 
 def main_source(name: str) -> str:
+    """Return the path of a reference's main source."""
     return MAIN.get(name, "noise[1]")
 
 
 def candidates(name: str, control: str) -> tuple[list[float], float]:
-    """The values scanned along a control, and the reference's own."""
+    """Return the values scanned along a control, and the reference's own."""
     kind = main_source(name)[:-3]
     src = to_dict(loads(reference_text(name)))[kind][0]
     if control == "length":
@@ -67,8 +79,8 @@ def candidates(name: str, control: str) -> tuple[list[float], float]:
     return sorted(set(STEPS[control]) | {own}), own
 
 
-def moved(name: str, control: str, value: float):
-    """The reference with one control of its main source at `value`, or None where the patch refuses it."""
+def moved(name: str, control: str, value: float) -> Patch | None:
+    """Return the reference with one control of its main source at `value`, or None where the patch refuses it."""
     p = loads(reference_text(name))
     try:
         if control == "length":
@@ -86,8 +98,8 @@ def moved(name: str, control: str, value: float):
         return None
 
 
-def status(job) -> tuple:
-    """(job, inside), with None for inside where the patch refuses the value."""
+def status(job: Job) -> tuple[Job, bool | None]:
+    """Return (job, inside), with None for inside where the patch refuses the value."""
     name, control, value, seed, take = job
     p = moved(name, control, value)
     if p is None:
@@ -95,8 +107,8 @@ def status(job) -> tuple:
     return job, domain(synthesize(dataclasses.replace(p, seed=seed, take=take))).inside
 
 
-def extent(values: list[float], own: float, states: dict) -> tuple:
-    """(low, high, why low stops, why high stops) of the run of values around `own` where every render is inside."""
+def extent(values: list[float], own: float, states: dict[float, bool | None]) -> Extent:
+    """Return (low, high, why each end stops) of the run of values around `own` where every render is inside."""
     i = values.index(own)
     ok = [states[v] is True for v in values]
     if not ok[i]:
@@ -115,8 +127,10 @@ def extent(values: list[float], own: float, states: dict) -> tuple:
     return values[lo], values[hi], why(lo - 1), why(hi + 1)
 
 
-def measure(seeds: int, takes: int, workers: int) -> dict:
-    jobs, scans = [], {}
+def measure(seeds: int, takes: int, workers: int) -> dict[tuple[str, str], Extent]:
+    """Scan every control of every reference over seeds × takes, in parallel processes, and find each extent."""
+    jobs: list[Job] = []
+    scans: dict[tuple[str, str], tuple[list[float], float]] = {}
     for name in REFERENCES:
         for control in CONTROLS:
             values, own = candidates(name, control)
@@ -126,14 +140,14 @@ def measure(seeds: int, takes: int, workers: int) -> dict:
                 values = sorted(set(values) | {own})
             scans[(name, control)] = (values, own)
             jobs += [(name, control, v, s, t) for v in values for s in range(1, seeds + 1) for t in range(1, takes + 1)]
-    found: dict = {}
+    found: dict[tuple[str, str, float], list[bool | None]] = {}
     with ProcessPoolExecutor(workers) as pool:
         for (name, control, value, _, _), inside in pool.map(status, jobs, chunksize=4):
             found.setdefault((name, control, value), []).append(inside)
     out = {}
     for (name, control), (values, own) in scans.items():
         # A value is refused (None) or inside (True) only if every render agrees; any render outside makes it False.
-        states = {}
+        states: dict[float, bool | None] = {}
         for v in values:
             seen = found[(name, control, v)]
             states[v] = None if None in seen else all(seen)
@@ -142,34 +156,37 @@ def measure(seeds: int, takes: int, workers: int) -> dict:
 
 
 def text(v: float, control: str) -> str:
+    """Write a control's value in its unit."""
     if control == "length":
         return f"{v:.2f}×"
     if control.startswith("band"):
-        return f"{v / 1000:.3g} kHz" if v >= 1000 else f"{v:.3g} Hz"
+        return f"{v / KILO:.3g} kHz" if v >= KILO else f"{v:.3g} Hz"
     return f"{v:g}"
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Measure every reference's validated extent along each control, and print it."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", type=int, default=4)
     ap.add_argument("--takes", type=int, default=4)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     args = ap.parse_args(argv)
     result = measure(args.seeds, args.takes, args.workers)
-    print(f"seeds 1–{args.seeds} × takes 1–{args.takes}; an end in brackets says what stops it")
+    out = sys.stdout
+    out.write(f"seeds 1–{args.seeds} × takes 1–{args.takes}; an end in brackets says what stops it\n")
     for name in REFERENCES:
-        print(f"{name} ({main_source(name)}):")
+        out.write(f"{name} ({main_source(name)}):\n")
         for control in CONTROLS:
             if (name, control) not in result:
                 continue
             lo, hi, why_lo, why_hi = result[(name, control)]
             own = candidates(name, control)[1]
-            if lo is None:
-                print(f"  {control:<11s} the reference's own value {text(own, control)} is outside")
+            if lo is None or hi is None:
+                out.write(f"  {control:<11s} the reference's own value {text(own, control)} is outside\n")
                 continue
-            print(
+            out.write(
                 f"  {control:<11s} {text(lo, control)} [{why_lo}] – {text(hi, control)} [{why_hi}]"
-                f"   (reference {text(own, control)})",
+                f"   (reference {text(own, control)})\n",
             )
     return 0
 
