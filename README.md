@@ -101,7 +101,7 @@ choked by the closed one, and `hats/hats.sfz` to play it.
 | True peak | read on the file's own reconstruction at 32 times the base rate, within 0.0001 dB of a 19 kHz sine's amplitude |
 | Loudness | the largest momentary loudness, BS.1770's 400 ms window slid sample by sample, at every rate |
 | Length | every shape ends by 8 s |
-| Render time | about 0.15 s for a closed hat and 1.2 s for a 5 s crash, and 7 s for a kit of 96 files, on a 12-core laptop |
+| Render time | about 0.1 s for a closed hat, under a second for a 5 s crash and 4–7 s for a kit of 96 files, on a 12-core laptop |
 
 ## Documentation
 

@@ -418,6 +418,16 @@ Where the time goes, for the crash at 88.2 kHz with a new take: tables
 true peak 58 ms, the drive-headroom search 28 ms, the probes 22 ms, loudness
 14 ms and the kink terms 11 ms.
 
+On the Oryon (12 cores, WSL 2, Python 3.15, NumPy 2.5.4, SciPy 1.18.1), after
+rattles, the exact true peak and the kit's shared cores, a new take of the
+closed hat renders in 67–77 ms, the open hat in 162–185 ms, the crash in
+662–732 ms and the ride in 513–596 ms over the four rates, the 96-file kit in
+3.6 s, and memory stays within 318 MiB above the baseline. The exact true peak
+costs about 0.13 s of the crash; before the kit's workers shared the cores,
+twelve of them each started a thread per core and the kit took 13–48 s,
+missing its 30 s budget in the worst runs. On a busier day the same machine
+measured up to 1.2 s for the crash and 6.9 s for the kit.
+
 Decimation first ran as parallel `upfirdn` chunks, bit-identical to one call.
 Their scalar inner loop took 760 ms of this render, which then took 1,675 ms
 and missed its budget. As matrix products in fixed blocks (plan §3) it takes
