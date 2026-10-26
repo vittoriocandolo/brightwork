@@ -7,6 +7,8 @@ import hashlib
 import json
 import math
 import os
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,6 +20,7 @@ from threadpoolctl import threadpool_info, threadpool_limits
 
 from brightwork_synth import carrier, spectrum
 
+PROMPT_S = 1.0  # a cached table is served within this, whatever another render holds
 DATA = Path(carrier.__file__).parent / "data"
 TAPS_ROUNDING = 1e-15  # how close the shipped taps are to a fresh design
 DESIGN_ERROR = 1e-13  # of the carrier's RMS: what each shipped design records, at most
@@ -218,6 +221,35 @@ def test_the_cache_drops_the_oldest_but_never_what_a_render_needs(monkeypatch: p
     keys = [("p",), ("q",), ("r",)]
     assert len(carrier.tables(keys, rate, lambda _: a)) == len(keys)
     assert all(carrier.cached(k, rate) for k in keys)
+    carrier.clear_cache()
+
+
+def test_a_render_never_waits_on_anothers_tables() -> None:
+    """Serve a cached table while another render is still making its own, and make again what was evicted meanwhile."""
+    carrier.clear_cache()
+    rate = carrier.table_rate(48000)
+    a = noise(11)
+    carrier.tables([("ready",)], rate, lambda _: a)
+    started, release = threading.Event(), threading.Event()
+
+    def slow(_: int) -> carrier.Lines:
+        started.set()
+        release.wait(5)
+        return a
+
+    other = threading.Thread(target=carrier.tables, args=([("slow",), ("ready",)], rate, slow))
+    other.start()
+    assert started.wait(5)
+    t0 = time.perf_counter()
+    served = carrier.tables([("ready",)], rate, lambda _: a)
+    assert time.perf_counter() - t0 < PROMPT_S  # `other` is still held, for up to 5 s
+    assert carrier.cached(("ready",), rate)
+    carrier.clear_cache()  # evicts what `other` found cached, before it keeps its own
+    release.set()
+    other.join(5)
+    assert not other.is_alive()
+    assert carrier.cached(("slow",), rate)
+    assert np.array_equal(carrier.tables([("ready",)], rate, lambda _: a)[0], served[0])
     carrier.clear_cache()
 
 

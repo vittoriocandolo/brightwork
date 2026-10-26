@@ -275,31 +275,43 @@ _LOCK = threading.Lock()
 def tables(keys: Sequence[Key], rate: int, make: Callable[[int], Lines]) -> list[Floats]:
     """Return one read-only table per key at `rate`, computed in parallel and cached.
 
-    make(i) gives the i-th key's bins and amplitudes when its table is missing.
+    make(i) gives the i-th key's bins and amplitudes when its table is missing. The cache is locked only to look
+    tables up and to keep them, never while they are computed, so renders of other patches never wait on this
+    one's tables. A table is a pure function of its key, so two renders that compute the same one agree.
     """
     ks = [(key, rate) for key in keys]
-    with _LOCK:
-        todo: list[tuple[tuple[Key, int], NDArray[np.int64], NDArray[np.complex128]]] = []
-        seen: set[tuple[Key, int]] = set()
-        for i, k in enumerate(ks):
-            if k not in _CACHE and k not in seen:
-                seen.add(k)
-                todo.append((k, *make(i)))
-        if todo:
-            with ThreadPoolExecutor(max_workers=min(len(todo), threads())) as pool:
-                for (k, _, _), row in zip(todo, pool.map(lambda r: table(r[1], r[2], rate), todo), strict=True):
-                    row.flags.writeable = False
-                    _CACHE[k] = row
-        for k in ks:
-            _CACHE[k] = _CACHE.pop(k)
-        needed = set(ks)
-        size = sum(a.nbytes for a in _CACHE.values())
-        for k in list(_CACHE):
-            if size <= CACHE_BYTES:
-                break
-            if k not in needed:
-                size -= _CACHE.pop(k).nbytes
-        return [_CACHE[k] for k in ks]
+    made: dict[tuple[Key, int], Floats] = {}
+    while True:
+        with _LOCK:
+            for k, row in made.items():
+                _CACHE.setdefault(k, row)
+            todo: dict[tuple[Key, int], int] = {}  # each missing table, and the first key index that needs it
+            for i, k in enumerate(ks):
+                if k not in _CACHE:
+                    todo.setdefault(k, i)
+            if not todo:
+                return _kept(ks)
+        # Outside the lock: another render may evict one of ours meanwhile, which the next round makes again.
+        rows = [(k, *make(i)) for k, i in todo.items()]
+        made = {}
+        with ThreadPoolExecutor(max_workers=min(len(rows), threads())) as pool:
+            for (k, _, _), row in zip(rows, pool.map(lambda r: table(r[1], r[2], rate), rows), strict=True):
+                row.flags.writeable = False
+                made[k] = row
+
+
+def _kept(ks: list[tuple[Key, int]]) -> list[Floats]:
+    """Return these cached tables, under the lock, as the most recent; evict the oldest others past the cap."""
+    for k in ks:
+        _CACHE[k] = _CACHE.pop(k)
+    needed = set(ks)
+    size = sum(a.nbytes for a in _CACHE.values())
+    for k in list(_CACHE):
+        if size <= CACHE_BYTES:
+            break
+        if k not in needed:
+            size -= _CACHE.pop(k).nbytes
+    return [_CACHE[k] for k in ks]
 
 
 def cached(key: Key, rate: int) -> bool:
