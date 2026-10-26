@@ -419,6 +419,37 @@ have been checked in sfizz and liquidsfz (VALIDATION.md).
   hat, is F#2. DAWs that call middle C C3, such as Ableton Live, Cubase and
   Logic Pro, call it F#1.
 
+## Python API
+
+The modules are importable for scripting renders and kits:
+
+```python
+from brightwork_synth import cli, pack, patch, render
+
+hat = patch.loads(cli.reference_text("closed"))  # or patch.load("hat.toml"); raises patch.PatchError
+hat = patch.pitch(hat, "-2")  # every editing command is a function that returns a new patch
+audio, report = render.render_takes(hat, 4)  # four takes sharing one gain, float32 arrays
+print(report)
+if not report.over:
+    for a, f in zip(audio, report.files, strict=True):
+        render.export(f"hat_rr{f.number}.wav", a, hat, report, f)  # with the patch and its provenance
+```
+
+`render.render(p)` renders one take. A kit is built, checked, then written:
+
+```python
+from brightwork_synth import cli, pack, patch
+
+closed = patch.loads(cli.reference_text("closed"))
+soft = patch.softer(closed, 8)
+opened = patch.loads(cli.reference_text("open"))
+groups = [(42, [("closed", closed), ("closed-8", soft)]), (46, [("open", opened)])]
+kit = pack.build(groups, pack.Options(takes=4, chokes=((46, (42,)),)), stem="hats")  # raises pack.PackError
+print("\n".join(kit.lines("hats")))
+if not pack.over(kit):
+    pack.write(kit, "hats")  # the WAVs and hats/hats.sfz
+```
+
 ## Outside the family
 
 - Gongs and tam-tams, whose pitch glides and whose tails outlast 8 s; bells,

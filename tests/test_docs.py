@@ -4,6 +4,7 @@
 """The documentation's links lead somewhere, every figure and sound is shown, and what it shows is the code's."""
 
 import re
+import runpy
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,22 @@ def test_the_readme_on_pypi_links_into_the_repository_at_the_release() -> None:
     assert "[this page](#install)" in out
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "](docs/" not in readme.absolute(readme_text, "https://github.com/someone/brightwork", "v0")
+
+
+def test_the_guides_python_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run every Python example in the guide, in an empty folder, and find the files they say they write."""
+    guide = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
+    examples = re.findall(r"```python\n(.*?)```", guide, flags=re.DOTALL)
+    assert examples
+    monkeypatch.chdir(tmp_path)
+    for i, code in enumerate(examples):
+        script = tmp_path / f"example_{i}.py"
+        script.write_text(code, encoding="utf-8")
+        runpy.run_path(str(script))
+    capsys.readouterr()
+    assert sorted(p.name for p in tmp_path.glob("hat_rr*.wav")) == [f"hat_rr{j}.wav" for j in range(1, 5)]
+    assert (tmp_path / "hats" / "hats.sfz").exists()
