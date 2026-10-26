@@ -73,7 +73,9 @@ BAR_TOLERANCE_S = 0.001  # how far a bed may be from a whole number of bars
 STEREO = 2  # channels
 EVEN_ODDS = 0.5  # a fair coin's: which of a blind pair plays first
 POLL_S = 0.1  # how often the session looks at its files and its pairs
-FAILURES = (ValueError, RuntimeError, OSError, ArithmeticError, MemoryError)  # what a render can fail with
+# What a render can fail with: its own errors, and the lookup and type errors a bug would raise, so that a failed
+# render is reported and the watcher keeps watching.
+FAILURES = (ValueError, RuntimeError, OSError, ArithmeticError, MemoryError, LookupError, TypeError)
 
 
 class Offer(NamedTuple):
@@ -605,7 +607,8 @@ class Session:
         p = loads(text)
         files = 1 if first and p.output.mode == "gain" else self.settings.takes
         audio, report = render_takes(p, files, stereo=self.settings.stereo)
-        return playable(audio, report), report
+        # An over is reported, never played: PCM could not even hold it.
+        return (audio if report.over else playable(audio, report)), report
 
     def _work_for(self, slot: int) -> Callable[[str, int], object]:
         """Make the work of a slot's watcher: its first file early when it can play alone, then every take."""
@@ -797,6 +800,7 @@ def audition(
     try:
         stream = (stream_factory or device_stream)(session.rate, session.hits.channels, session.hits.fill)
     except RuntimeError as e:
+        session.close()
         sys.stderr.write(f"{e}\n")
         return 1
     try:

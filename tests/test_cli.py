@@ -404,3 +404,18 @@ def test_python_dash_m_runs_the_command_line(
         runpy.run_module("brightwork_synth", run_name="__main__")
     assert caught.value.code == 0
     assert capsys.readouterr().out == f"brightwork {__version__}\n"
+
+
+def test_verify_and_render_say_what_they_cannot_do(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    example: Path,
+) -> None:
+    """Refuse takes out of range in verify, and an output folder that does not exist in render, without a traceback."""
+    code, _, err = run(capsys, "verify", example, "--takes", 0)
+    assert code == BAD_INPUT
+    assert err.startswith(f"{example}: --takes: needs 1 to")
+    missing = tmp_path / "nowhere" / "hat.wav"
+    code, _, err = run(capsys, "render", example, "--out", missing)
+    assert code == BAD_INPUT
+    assert err == f"{missing}: No such file or directory\n"

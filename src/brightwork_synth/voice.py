@@ -45,13 +45,14 @@ type Span = tuple[int, int]  # internal samples a ≤ n < b
 type Row = tuple[str, int, float, float]  # a knot's path, its time's index, Δx″ and Δx‴
 
 TWO_PI = 2 * math.pi
+END_ROUNDING_S = 1e-12  # how far apart two roundings of the sound's end may lie
 
 
 def drive_alpha(db: float) -> float:
     """Return α with α / tanh α = 10^(db/20): the saturator's small-signal gain. 0 dB is bypass."""
-    if db == 0.0:
-        return 0.0
     g = 10.0 ** (db / 20.0)
+    if g == 1.0:  # 0 dB, or a drive too small to change a float's gain: bypass
+        return 0.0
     # x / tanh x lies between x and x + 1, so [g − 1, g] brackets the root.
     root: float = brentq(
         lambda a: a / math.tanh(a) - g,
@@ -548,10 +549,12 @@ def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables) -> Kinks:
     times += [s.grains.knots()[0] for s in v.audible if s.grains is not None]
     if v.damper is not None:
         times.append(v.damper.t)
-    if not times:
+    if not v.audible:  # silence has no kinks, whatever its damper does
         return _no_kinks()
     grid = np.unique(np.concatenate(times))
-    grid = grid[grid <= v.t_src]  # nothing after the sound's end is rendered
+    # Nothing after the sound's end is rendered. The end is computed in ms from the patch and a sub-band's last knot
+    # in s from its time map, which may round an ulp apart: a knot that close to the end still counts.
+    grid = grid[grid <= v.t_src + END_ROUNDING_S]
     st = state(v, grid, ip, tabs)
     where = {float(u): i for i, u in enumerate(grid)}
     rows: list[Row] = []

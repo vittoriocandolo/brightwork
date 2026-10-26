@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from numpy.typing import ArrayLike, NDArray
 
-from brightwork_synth import carrier, rattle, spectrum, voice
+from brightwork_synth import carrier, patch, rattle, render, spectrum, voice
 from brightwork_synth.curve import Curve, amplitude_curve, mapped
 from brightwork_synth.patch import Noise, Patch, Tone, loads
 
@@ -104,6 +104,7 @@ def internal_x(p: Patch, count: int | None = None) -> Floats:
 def test_drive_identities() -> None:
     """Solve α for each drive, and find the saturator odd, monotone, 1 at 1, of the drive's small-signal gain."""
     assert voice.drive_alpha(0.0) == 0.0
+    assert voice.drive_alpha(1e-16) == 0.0  # a gain that rounds to 1 is bypass, not a division by 0
     for db in (0.5, 6.0, 18.0, 48.0):
         a = voice.drive_alpha(db)
         assert a / math.tanh(a) == pytest.approx(10 ** (db / 20), rel=1e-14)
@@ -591,6 +592,32 @@ def test_silence_has_no_kinks() -> None:
     k = kinky_jumps(p)
     assert k.t.size == 0
     assert voice.kink_bound(k, 0.0, RATE, 24000.0) == 0.0
+
+
+def test_a_silent_patch_with_a_damper_has_no_kinks() -> None:
+    """Find no kinks in silence that a damper chokes later, and render it as one silent sample."""
+    p = patch.choke(make(**{"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf}), 50.0)
+    assert kinky_jumps(p).t.size == 0
+    audio, report = render.render(p)
+    assert not np.any(audio)
+    assert report.inside
+
+
+def test_the_last_knot_counts_however_the_end_rounds() -> None:
+    """Keep the slowest sub-band's last knot in the kink terms when the end, computed in ms, rounds an ulp short."""
+    p = make(
+        **{
+            "noise[1].bloom": 0.64,
+            "noise[1].damping": 0.0,
+            "noise[1].band_hz": [6031.7, 18000.0],
+            "noise[1].amp": amp((0, 0), (0.3, 1), (8, 0.45), (30, 0.14), (2563.0, 0)),
+            "noise[2].level_db": -math.inf,
+        },
+    )
+    v = voice.voice(p)
+    last = max(float(sb.env.t[-1]) for s in v.audible for sb in s.subbands)
+    assert last > v.t_src  # the case: an ulp past the end as the patch computes it
+    assert last in kinky_jumps(p).t
 
 
 def test_example_patch_kinks_are_dominated_by_the_stick() -> None:

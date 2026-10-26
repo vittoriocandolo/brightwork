@@ -139,7 +139,11 @@ def cmd_render(args: argparse.Namespace) -> int:
         # Every file first, then the report: a closed output never leaves a set half written.
         paths = file_paths(args.out, len(report.files))
         for path, a, f in zip(paths, audio, report.files, strict=True):
-            export(path, a, p, report, f)
+            try:
+                export(path, a, p, report, f)
+            except OSError as e:
+                msg = f"{path}: {e.strerror or e}"
+                raise CliError(msg) from None
         sys.stdout.write(f"{report}\n" + "".join(f"wrote {path}\n" for path in paths))
         return 0
     sys.stdout.write(f"{report}\n")
@@ -159,7 +163,11 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     """Compare a patch, or its takes, with the reference render."""
-    v = verify(_patch(args.patch), takes=args.takes)
+    try:
+        v = verify(_patch(args.patch), takes=args.takes)
+    except RenderError as e:
+        msg = f"{args.patch}: {e}"
+        raise CliError(msg) from None
     sys.stdout.write(f"{v}\n")
     return 0 if v.passed else 1
 

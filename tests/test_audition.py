@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -882,3 +883,29 @@ def test_audition_polls_for_edits_until_interrupted(example: Path, monkeypatch: 
     settings = audition.Settings(watch=True)
     assert audition.audition([example], settings, stream_factory=Stream, out=Collect([])) == 0
     assert sleeps == [audition.POLL_S, audition.POLL_S]
+
+
+def test_a_pcm_over_is_refused_with_what_to_lower(tmp_path: Path) -> None:
+    """Refuse a 16-bit patch over its ceiling as an over, saying what to lower, not as a failed quantization."""
+    path = tmp_path / "loud.toml"
+    loud = EXAMPLE.replace('"float32"     #', '"pcm16"       #').replace("db          = -6.0", "db          = 12.0")
+    path.write_text(loud, encoding="utf-8")
+    with pytest.raises(audition.OverError, match=r"lower output\.db"):
+        audition.Session(path, out=Collect([]))
+
+
+def test_a_refused_device_stops_every_watcher(tmp_path: Path, example: Path) -> None:
+    """Stop rendering and saying anything once the device refuses the stream."""
+    other = tmp_path / "other.toml"
+    other.write_text(OTHER, encoding="utf-8")
+    log: list[str] = []
+
+    def refused(_rate: int, _channels: int, _fill: audition.Fill) -> AbstractContextManager[object]:
+        msg = "no device"
+        raise RuntimeError(msg)
+
+    code = audition.audition([example, other], stream_factory=refused, out=Collect(log))
+    assert code == REFUSED
+    said_then = len(log)
+    time.sleep(1.0)  # the second patch rendered behind the first would report here
+    assert len(log) == said_then
