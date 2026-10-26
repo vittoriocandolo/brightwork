@@ -109,7 +109,10 @@ choked by the closed one, and `hats/hats.sfz` to play it.
   level, spectrum and drive headroom.
 - [User guide](docs/GUIDE.md): the workflow, every control, recipes, kits and
   chokes, audition, and reading the report.
-- [Design](docs/PLAN.md): the sound model and the reasoning behind it.
+- [Design](docs/DESIGN.md): every stage of the sound, from the code, and what
+  makes a render validated and reproducible.
+- [The design plan](docs/PLAN.md): the plan the code was built from, with the
+  measurements behind each choice and the decisions still open.
 - [Validation](docs/VALIDATION.md): the evidence, from the numerical criteria
   to the adversarial grid and the performance budget.
 - [The sample-replacement benchmark](docs/BENCHMARK.md): a protocol to run

@@ -1,5 +1,10 @@
 # Brightwork — Design and Implementation Plan
 
+> This is the plan Brightwork was built from, kept as its design record: the
+> measurements that chose each design, what it carried over from the kick and
+> the snare, its milestones and the decisions still open. The code cites it by
+> section. For how the instrument works today, read [DESIGN.md](DESIGN.md).
+
 *Revision 1. Follows the Kick Synth (plan revision 2), which was implemented, validated and approved by ear, and the Snare/Clap Synth (plan revision 4), which was implemented and validated by measurement and awaits its listening approval. This is an independent codebase on its own branch: it carries over their designs and findings, not their code.*
 
 The architecture has now held up twice. Every synthesis stage is a pure function of time, curves and noise are exact, one saturator feeds one frozen decimator, patches are strict and complete, and the validated domain is measured. This plan keeps all of it and adapts it to the longest, brightest and most intricate sounds in a kit, for professionals who program hi-hats and cymbals in a DAW or a sampler.

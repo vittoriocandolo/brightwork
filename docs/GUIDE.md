@@ -3,7 +3,7 @@
 This guide is for producers and sound designers who program hi-hats, cymbals
 and tops such as shakers and tambourines. It covers the workflow, every control, recipes for common edits, kits
 with chokes, and how to read what a render reports. The design and its
-evidence are in [PLAN.md](PLAN.md) and [VALIDATION.md](VALIDATION.md).
+evidence are in [DESIGN.md](DESIGN.md) and [VALIDATION.md](VALIDATION.md).
 
 ## The workflow
 
