@@ -388,6 +388,10 @@ cutting the voice some 50 ms after a 40 ms release. liquidsfz plays its right
 channel 1.0125 times its left, and its default interpolation rolls off
 16–20 kHz by about 2.4 dB relative to 1–4 kHz. Neither affects the mapping.
 
+After rattles, the true-peak mode and the kit's shared cores, the test ran
+again in a throwaway Debian 13 container on the Oryon, with sfizz 1.2.3 and
+liquidsfz 0.4.1 built from source: all six checks pass.
+
 ## Performance (§3)
 
 `tools/bench.py`, in fresh interpreters, with tables computed for every timed
