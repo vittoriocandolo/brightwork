@@ -5,6 +5,7 @@
 
 import re
 import runpy
+import shlex
 from pathlib import Path
 
 import pytest
@@ -119,4 +120,28 @@ def test_the_guides_python_runs(
         runpy.run_path(str(script))
     capsys.readouterr()
     assert sorted(p.name for p in tmp_path.glob("hat_rr*.wav")) == [f"hat_rr{j}.wav" for j in range(1, 5)]
+    assert (tmp_path / "hats" / "hats.sfz").exists()
+
+
+def test_the_readmes_quick_start_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run every command of the README's quick start but audition, in an empty folder, as a shell would."""
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+    block = re.search(r"## Quick start\n\n```\n(.*?)```", readme_text, flags=re.DOTALL)
+    assert block is not None
+    monkeypatch.chdir(tmp_path)
+    for line in block.group(1).splitlines():
+        command = shlex.split(line.split("#")[0])
+        assert command[0] == "brightwork"
+        if command[1] == "audition":  # it plays until stopped
+            continue
+        args, out = (command[1:-2], command[-1]) if ">" in command else (command[1:], None)
+        assert cli.main(args) == 0, line
+        printed = capsys.readouterr().out
+        if out is not None:
+            Path(out).write_text(printed, encoding="utf-8")
+    assert len(list((tmp_path / "hats").glob("*.wav"))) == (2 + 1) * 8
     assert (tmp_path / "hats" / "hats.sfz").exists()
