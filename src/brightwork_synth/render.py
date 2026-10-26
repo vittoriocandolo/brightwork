@@ -875,8 +875,13 @@ def file_gains(outs: list[Floats], rate: int, *, level_match: bool) -> list[floa
     """Return each file's gain from level matching to the first: 1 without, and for silence."""
     if not level_match:
         return [1.0] * len(outs)
-    loud = [momentary_max(o, rate) for o in outs]
-    return [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
+    return matched_gains([momentary_max(o, rate) for o in outs])
+
+
+def matched_gains(loudness: Sequence[float]) -> list[float]:
+    """Return the gains that bring every file to the first's loudness, in LUFS; 1 for silence, or after it."""
+    first = loudness[0]
+    return [10.0 ** ((first - x) / 20.0) if first > -math.inf and x > -math.inf else 1.0 for x in loudness]
 
 
 def set_gain(o: Output, peaks: Sequence[float], true_peaks: Sequence[float]) -> float:

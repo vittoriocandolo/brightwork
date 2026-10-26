@@ -50,6 +50,7 @@ from .render import (
     ceiling,
     db,
     domain,
+    matched_gains,
     output_stage,
     set_gain,
     synthesize,
@@ -390,11 +391,7 @@ def _render(every: list[tuple[str, Patch]], options: Options, workers: int | Non
         i += len(ts)
     rate = every[0][1].output.sample_rate
     loud = [[momentary_max(f, rate) for f in files] for files in raw]
-    match = options.level_match
-    gains = [
-        [(10.0 ** ((row[0] - x) / 20.0) if match and row[0] > -math.inf and x > -math.inf else 1.0) for x in row]
-        for row in loud
-    ]
+    gains = [matched_gains(row) if options.level_match else [1.0] * len(row) for row in loud]
     return Rendered(raw, held, doms, true_peaks, loud, gains)
 
 

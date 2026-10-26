@@ -42,7 +42,7 @@ from scipy.fft import irfft, next_fast_len, rfft
 from scipy.signal import upfirdn
 
 from . import carrier
-from .render import FAMILY, Domain, K, decimator, domain, rates, synthesize, take_numbers
+from .render import FAMILY, Domain, K, db, decimator, domain, rates, synthesize, take_numbers
 from .voice import Model, gate, sample_count, saturate, tables, voice
 
 if TYPE_CHECKING:
@@ -177,11 +177,6 @@ class Errors:
         return self.rel_db <= limit_db and self.max_db <= limit_db
 
 
-def _db(x: float) -> float:
-    """Return x in decibels, -inf for 0."""
-    return 20 * math.log10(x) if x > 0 else -math.inf
-
-
 def compare(test: Floats, ref: Floats) -> Errors:
     """Measure how far `test` is from `ref`."""
     err = test - ref
@@ -189,8 +184,8 @@ def compare(test: Floats, ref: Floats) -> Errors:
     max_abs = float(np.max(np.abs(err), initial=0.0))
     norm = float(np.linalg.norm(ref))
     return Errors(
-        _db(float(np.linalg.norm(err)) / norm) if norm else -math.inf,
-        _db(max_abs / peak) if peak else -math.inf,
+        db(float(np.linalg.norm(err)) / norm) if norm else -math.inf,
+        db(max_abs / peak) if peak else -math.inf,
         max_abs,
         peak,
     )
@@ -202,7 +197,7 @@ def leakage_db(internal: Floats, out: Floats, rate: int, base: int, stopband_db:
     f = np.arange(spectrum.size) * rate / internal.size
     oob = math.sqrt(2 * float(np.sum(np.abs(spectrum[f >= base / 2]) ** 2)) / internal.size)
     norm = float(np.linalg.norm(out))
-    return _db(10 ** (-stopband_db / 20) * oob / norm) if norm else -math.inf
+    return db(10 ** (-stopband_db / 20) * oob / norm) if norm else -math.inf
 
 
 @dataclass(frozen=True)
