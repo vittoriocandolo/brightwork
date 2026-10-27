@@ -20,8 +20,18 @@ Listen to the references: the hats [closed](docs/audio/closed.wav) ·
 [analog](docs/audio/analog.wav); the cymbals [crash](docs/audio/crash.wav) ·
 [ride](docs/audio/ride.wav) · [bell](docs/audio/bell.wav); the tops
 [shaker](docs/audio/shaker.wav) · [tambourine](docs/audio/tambourine.wav);
-and for trance, tech house and the two ends of the axis from machine to band,
-[offbeat](docs/audio/offbeat.wav) · [tight](docs/audio/tight.wav) ·
+for house [house-open](docs/audio/house-open.wav) ·
+[house-ride](docs/audio/house-ride.wav) · [house-tamb](docs/audio/house-tamb.wav);
+for tech house [tight](docs/audio/tight.wav) · [top](docs/audio/top.wav) ·
+[shaker-16](docs/audio/shaker-16.wav); for trance
+[offbeat](docs/audio/offbeat.wav) · [trance-ride](docs/audio/trance-ride.wav) ·
+[trance-crash](docs/audio/trance-crash.wav); from the machine
+[analog-open](docs/audio/analog-open.wav) ·
+[analog-cymbal](docs/audio/analog-cymbal.wav) ·
+[machine-closed](docs/audio/machine-closed.wav) ·
+[machine-open](docs/audio/machine-open.wav); and from the band
+[half-open](docs/audio/half-open.wav) · [sizzle](docs/audio/sizzle.wav) ·
+[china](docs/audio/china.wav) · [splash](docs/audio/splash.wav) ·
 [dead](docs/audio/dead.wav) · [wash](docs/audio/wash.wav). They are matched
 in loudness, and the [gallery](docs/references.md) shows each one's level,
 spectrum and drive headroom.
@@ -42,6 +52,10 @@ spectrum and drive headroom.
 - **Rattles.** Any source can sound at a stream of collisions instead, one to
   each cell of time, thinning out as the shake dies: shakers, tambourines,
   maracas and cabasas, as loud at the peak as the source they gate.
+- **A drum machine's memory.** `[storage]` stores the sound as the
+  machines of the eighties stored their cymbals, a few bits deep at a few
+  tens of kilohertz, then plays it back through a held DAC and a low-pass,
+  the damper as its decay: exactly, on purpose, and only when asked.
 - **Chokes and kits.** A damper closes every source at once, as a hand on a
   crash or a foot on the hats. `brightwork pack` writes kits of keys with
   velocity layers on a square law, round robins and choke groups, mapped by
@@ -95,7 +109,7 @@ choked by the closed one, and `hats/hats.sfz` to play it.
 | Sample rates | 44.1, 48, 88.2 and 96 kHz; the 2× rates are the base rate's files with samples filled in |
 | Internal rate | 32 × the base rate: 1411.2 or 1536 kHz |
 | Decimators | frozen minimum-phase, flat to 0.00004 dB up to 20 kHz and at least 115.1 dB down from half the base rate |
-| Aliasing | every render reports whether it lies inside the validated domain, where the error against the reference is below −100 dB; the references take 11–48 dB of drive and stay inside |
+| Aliasing | every render reports whether it lies inside the validated domain, where the error against the reference is below −100 dB; the references take 11–47 dB of drive and stay inside |
 | Sources | up to four noise sources and two tones; modes 1–200 Hz apart; 1–16 partials a tone; rattles of up to 4,000 collisions a second |
 | Levels | a gain, or a sample or true peak target; nothing is ever clipped |
 | True peak | read on the file's own reconstruction at 32 times the base rate, within 0.0001 dB of a 19 kHz sine's amplitude |

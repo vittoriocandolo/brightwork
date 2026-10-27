@@ -52,14 +52,36 @@ STEPS = {
     "spacing_hz": [0.0, 1.0, 2.0, 4.0, 7.0, 10.0, 14.0, 20.0, 28.0, 40.0, 56.0, 80.0, 113.0, 160.0, 200.0],
     "grains_hz": [2.0 ** (k / 2) for k in range(9, 24)],  # 23 to 2,900 collisions a second
     "grain_ms": [2.0 ** (k / 2) for k in range(17)],  # 1 to 256 ms
+    "storage.bits": [float(b) for b in range(2, 17)],
+    "storage.rate_hz": [4000.0 * 2.0 ** (k / 2) for k in range(10)],  # 4 to 91 kHz
+    "storage.filter_hz": [1000.0 * 2.0 ** (k / 2) for k in range(9)],  # 1 to 16 kHz
 }
 OCTAVES = {"low": [2 ** (k / 2) for k in range(-6, 7)], "high": [2 ** (k / 4) for k in range(-8, 5)]}
+STORAGE = ("storage.bits", "storage.rate_hz", "storage.filter_hz")  # scanned only on a stored reference
 LENGTHS = [2 ** (k / 2) for k in range(-4, 5)]  # tail length, by `stretch` of every shape after its peak
-CONTROLS = ("band low", "band high", "spacing_hz", "damping", "bloom", "chatter", "grains_hz", "grain_ms", "length")
+CONTROLS = (
+    "band low",
+    "band high",
+    "spacing_hz",
+    "damping",
+    "bloom",
+    "chatter",
+    "grains_hz",
+    "grain_ms",
+    "length",
+    *STORAGE,
+)
 RATTLE = ("grains_hz", "grain_ms")  # scanned only on a source that rattles
 
 
-MAIN = {"bell": "tone[1]", "analog": "tone[1]", "tambourine": "noise[2]"}  # the others' is noise[1]
+MAIN = {
+    "bell": "tone[1]",
+    "analog": "tone[1]",
+    "analog-open": "tone[1]",
+    "analog-cymbal": "tone[1]",
+    "tambourine": "noise[2]",
+    "house-tamb": "noise[2]",
+}  # the others' is noise[1]
 
 
 def main_source(name: str) -> str:
@@ -74,6 +96,12 @@ def candidates(name: str, control: str) -> tuple[list[float], float]:
     src = to_dict(loads(reference_text(name)))[kind][int(path[-2]) - 1]
     if control == "length":
         return LENGTHS, 1.0
+    if control in STORAGE:
+        stored = to_dict(loads(reference_text(name)))["storage"]
+        if not stored["bits"]:
+            return [], math.nan
+        own = float(stored[control.split(".")[1]])
+        return sorted(set(STEPS[control]) | {own}), own
     if control.startswith("band"):
         lo, hi = src["band_hz"]
         own = lo if control == "band low" else hi
@@ -96,6 +124,8 @@ def moved(name: str, control: str, value: float) -> Patch | None:
             lo, hi = d[path[:-3]][int(path[-2]) - 1]["band_hz"]
             band = [value, hi] if control == "band low" else [lo, value]
             set_path(d, f"{path}.band_hz", band)
+        elif control in STORAGE:
+            set_path(d, control, int(value) if control == "storage.bits" else value)
         else:
             set_path(d, f"{path}.{control}", value)
         return from_dict(d)

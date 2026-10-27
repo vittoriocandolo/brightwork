@@ -40,6 +40,11 @@ amp = [                     # shape: 0 at both ends, peak exactly 1
   { ms = 25.0, gain = 0.0 },
 ]
 
+[storage]                   # a drum machine's sample memory: the sources stored, then played back
+bits      = 0               # 0 = off; else 2 … 16, quantized against the sound's peak
+rate_hz   = 32000.0         # stored at this rate, as near as the internal rate allows
+filter_hz = 16000.0         # played back through a low-pass, −3 dB here
+
 [damper]                    # multiplies every source: 1 until damped, then 0
 amp = []                    # no knots: never damped
 

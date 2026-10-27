@@ -41,6 +41,21 @@ REFERENCES = (
     "tight",
     "dead",
     "wash",
+    "house-open",
+    "house-ride",
+    "house-tamb",
+    "shaker-16",
+    "top",
+    "trance-crash",
+    "trance-ride",
+    "analog-open",
+    "analog-cymbal",
+    "machine-closed",
+    "machine-open",
+    "half-open",
+    "sizzle",
+    "china",
+    "splash",
 )
 SHORTEST_BEATS, LONGEST_BEATS = 1 / 8, 16  # the grid's note values, 1/32 to 4/1, in beats of a 4/4 bar
 MAX_KEY = 127  # the highest MIDI key

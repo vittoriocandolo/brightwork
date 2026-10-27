@@ -11,12 +11,12 @@ Not yet run.
 
 1. **Collect.** Gather the 20–30 hi-hat, cymbal and top samples you actually
    use that fall inside the family: closed, open, half-open and pedal hi-hats;
-   crashes, splashes and chinas; rides and ride bells; drum-machine hats and
-   cymbals; and shakers, tambourines, maracas and cabasas. Keep their articulations and velocity layers where they have
+   crashes, splashes, chinas and sizzles; rides and ride bells; drum-machine
+   hats and cymbals, analog or sampled; and shakers, tambourines, maracas
+   and cabasas. Keep their articulations and velocity layers where they have
    them. Gongs, tam-tams, bells and cowbells, rolls, swells, bowing and
-   brushes, rivet and sizzle cymbals, and sounds defined by processing or
-   storage (rooms, filtering after the fact, the 6-bit cymbals of a TR-909)
-   are out of family. List them anyway, marked out of family.
+   brushes, and sounds defined by processing (rooms, filtering after the
+   fact) are out of family. List them anyway, marked out of family.
 2. **Fix the time limit before starting.** 15 minutes per sample is a
    reasonable choice. Start each from the nearest reference (`brightwork init`),
    and edit with audition watching, in a pattern over your groove:

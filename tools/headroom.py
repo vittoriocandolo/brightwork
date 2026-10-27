@@ -57,14 +57,13 @@ from brightwork_synth.render import (
 )
 from brightwork_synth.voice import (
     Knees,
-    Model,
     drive_alpha,
+    internal,
     kink_bound,
     kink_terms,
     sample_count,
     saturate,
     slew_of,
-    synthesize_x,
     tables,
     voice,
 )
@@ -101,8 +100,8 @@ class Fixture:
         self.taps = decimator(FAMILY[p.output.sample_rate]).taps
         ip = interpolator_for(p.output.sample_rate)
         tabs = tables(v, ip.rate)
-        self.x = synthesize_x(Model(v, ip, tabs), self.rate, sample_count(v.t_src, self.rate))
-        self.kinks = kink_terms(v, ip, tabs)
+        self.x, _, _, stored = internal(v, self.rate, sample_count(v.t_src, self.rate), ip, tabs)
+        self.kinks = kink_terms(v, ip, tabs, stored)
         self.band = FAMILY[p.output.sample_rate] / 2
         u = np.concatenate(([0.0], self.x))  # every step from silence on
         a, b = u[:-1], u[1:]

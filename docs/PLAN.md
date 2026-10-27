@@ -68,7 +68,7 @@ On the goal of never needing another cymbal or hi-hat sample: no plan can guaran
 | Packs on one key | Kits: several keys, each with velocity layers and takes, and choke groups | A hi-hat is several articulations of one instrument |
 | Mono | Mono, or two takes as a stereo pair | Cymbals are usually recorded and used in stereo |
 | Audition on the backbeat | Also on subdivisions, in patterns and with chokes | Hats are judged in patterns |
-| Six references | Thirteen | The family is wider, reaches the tops, and is voiced along the vision |
+| Six references | Twenty-eight | The family is wider, reaches the tops, and is voiced along the vision |
 
 ---
 
@@ -78,7 +78,7 @@ The instrument has one voice. Up to four noise sources and two tones are summed 
 
 It is built for producers and sound designers who program hi-hats, cymbals and the tops of a groove in a DAW or a sampler: first the producers of house, tech house and trance, whose kick leads the mix and whose tops carry its groove, and from there along one axis, from the programmed machine to the played band. It renders one-shots, sets of round-robin takes, and kits: articulations on several keys, each with velocity layers, and choke groups that a sampler plays.
 
-Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. With rattles (§2.12) it reaches the tops beside them: shakers, tambourines, maracas and cabasas. Thirteen reference patches define acceptance:
+Its family is synthesized hi-hats and cymbals: closed, open, half-open and pedal hi-hats; crash, splash and china cymbals; rides and ride bells; and the analog metallic hats and cymbals of drum machines. With rattles (§2.12) it reaches the tops beside them: shakers, tambourines, maracas and cabasas. Twenty-eight reference patches define acceptance:
 
 - **Closed:** tight, bright plates with a stick tick.
 - **Open:** plates that ring and sizzle.
@@ -97,14 +97,22 @@ Four more are voiced for the producers the plan serves first, and for the two en
 - **Dead:** the played end's damped hat, as with a towel over the plates: dark, its highs gone at once.
 - **Wash:** the shoegaze end's ride, washed with a soft mallet: the highs swell after the strike and ring for seconds.
 
+Fifteen more widen the starting points along the same lines:
+
+- **House:** an off-beat open hat, darker and longer than trance's (`house-open`), a ride with a bright ping over a short wash (`house-ride`), and a crisp tambourine stroke (`house-tamb`).
+- **Tech house:** a short shaker stroke for sixteenths (`shaker-16`), and a top: a closed hat whose plates rattle (`top`).
+- **Trance:** the crash on the drop, its highs blooming (`trance-crash`), and a driving ride (`trance-ride`).
+- **The machine:** the analog squares open and as their cymbal (`analog-open`, `analog-cymbal`), and a cymbal's hats stored in 6 bits at 32 kHz, the damper as their decay (`machine-closed`, `machine-open`).
+- **The band:** a half-open hat (`half-open`), a ride with rivets (`sizzle`), a `china` and a `splash`.
+
 These are starting patches. Their names never select hidden algorithms.
 
 Six things are outside the model or the family:
 
 - Gongs and tam-tams, whose pitch glides and whose tails outlast 8 s. Bells, cowbells and other tuned metal are also out of family: a tone can make them, but no reference covers them.
 - Performance: rolls, swells, bowing, brushes, and the continuous pedal of an electronic hi-hat. One patch is one hit. Openness is a set of articulations, and dynamics are velocity layers (§2.11).
-- Sounds defined by processing or storage: rooms and reverb, filtering after the fact, and the 6-bit samples of machines such as the TR-909, whose cymbals are recordings of acoustic cymbals played through low-resolution memory. Their acoustic source is in the family; their playback character is not.
-- Rivet and sizzle cymbals, whose rivets buzz against the plate. A rattle on a cymbal's modes can approach them (§2.12), but no reference covers them.
+- Sounds defined by processing: rooms and reverb, and filtering after the fact. The low-resolution memory of machines such as the TR-909, whose cymbals are recordings of acoustic cymbals stored in a few bits, was outside the family too; storage (§2.13) now models it.
+- Rivet and sizzle cymbals were outside the family, their rivets buzzing against the plate; a rattle on a cymbal's modes now makes them (§2.12), as the `sizzle` reference does.
 - FM and wavetable metallics, whose spectra follow a moving modulation index or a table. Coherent sources can approach them.
 - A real-time plugin. The renderer is a pure function of the patch; it takes about 0.2 s for a closed hat and under 2 s for an 8 s ride (estimated). A later frontend could render on every edit and play cached buffers from MIDI. That frontend is not part of this plan.
 
@@ -121,7 +129,7 @@ The symbols:
 - j counts the sources, noise and tones alike, and g_j is a source's gain.
 - c_jb is sub-band b of the source's carrier: a fixed spectrum of lines on the grid (§2.3), weighted by the sub-band's window.
 - e_j is the source's shape, and τ_jb the sub-band's time map, which carries damping and bloom (§2.6).
-- G_j is the source's gate: its chatter gate (§2.7) times its collisions R_j when it rattles (§2.12). D is the damper (§2.8).
+- G_j is the source's gate: its chatter gate (§2.7) times its collisions R_j when it rattles (§2.12). D is the damper (§2.8). With storage on (§2.13), the sum of the gated sources is stored and played back before the damper multiplies it.
 - S_α, h, F, K, g_out and p are the snare's: the saturator, the frozen decimator of length L, the internal rate, the decimation factor, the output gain and the polarity.
 
 Everything before the decimator is a pure function of time, with no state.
@@ -320,6 +328,19 @@ Shakers, tambourines, maracas and cabasas are struck by many small collisions ra
 
 Every collision's knots are kinks of the source (§5). R is piecewise cubic, so it is rendered exactly by summing each run of 256 samples' cubic coefficients once, aligned to the start, and a sample never depends on the block.
 
+### 2.13 Storage
+
+$$v_m=\frac{\mathrm{round}\!\big(Q\,s(m/R)/P\big)}{Q}\,P,\qquad x(t)=D(t)\sum_m v_m\,g(t-m/R),\qquad g(t)=\tfrac12\Big[\operatorname{erf}\tfrac{t-L}{\sqrt2\,\sigma}-\operatorname{erf}\tfrac{t-L-1/R}{\sqrt2\,\sigma}\Big]$$
+
+A drum machine of the early eighties stored its cymbals as samples: recordings of acoustic cymbals, a few bits deep, read out at a few tens of kilohertz through a DAC that holds each value until the next, filtered, then shaped by a VCA. The TR-909 kept its hats and cymbals in 6 bits. With `storage.bits` above 0, Brightwork models that memory, opt-in, on any patch:
+
+- **Stored.** s is the sum of the sources with their gates, before the damper. It is taken at every D-th internal sample, D = round(F / `rate_hz`), so the storage rate is R = F / D, the report saying which; nothing filters it first, so what lies above R/2 folds down, as it did.
+- **Quantized.** Each value is rounded to Q = 2^(bits − 1) − 1 steps either side of 0 against the stored sound's own peak P, without dither: the noise left sits a fixed distance under the peak, about 6 dB per bit, so a decaying cymbal turns grainy as it fades.
+- **Played back.** Each value is held for 1/R and smoothed by a Gaussian low-pass whose −3 dB point is `filter_hz`, σ = √(ln 2)/(2π·`filter_hz`), delayed by L = 8σ so that, as any real filter, it answers only after its input. g is a closed form, smooth, 0 within 10⁻¹⁵ outside [0, 1/R + 2L], and nil far above the filter's frequency: playback adds no kinks and nothing for the internal rate to alias. The sound lasts 1/R + 2L longer than its sources.
+- **Damped.** The damper multiplies the playback, as a VCA shaped a stored sample: its `stretch` is the decay knob.
+
+The stored values are part of the model, as the seeds are: the reference method plays back the very values the shipping render stored, since a value a hair from a rounding threshold could otherwise round the other way. The kink bound then has only the damper's kinks to count (§5), times the smooth playback. The machine's tune knob, which changed pitch and length together, is left out: the storage rate is a property of the memory, and `pitch` resizes the cymbal that was stored.
+
 ## 3. Rendering policy
 
 **Internal rate and families.** As in the snare: F = K × base, where base is 44.1 or 48 kHz. The 88.2 and 96 kHz exports reuse their family's F and filter with factor K/2, so a 96 kHz file is exactly the 48 kHz file with the in-between samples filled in.
@@ -453,6 +474,11 @@ amp = [
   { ms = 5.0,  gain = 0.0 },
 ]
 
+[storage]                   # a drum machine's sample memory: the sources stored, then played back
+bits      = 0               # 0 = off; else 2 … 16, quantized against the sound's peak
+rate_hz   = 32000.0         # stored at this rate, as near as the internal rate allows
+filter_hz = 16000.0         # played back through a low-pass, −3 dB here
+
 [damper]                    # multiplies every source: 1 until damped, then down to 0
 amp = []                    # no knots: never damped
 
@@ -536,6 +562,7 @@ There are three separate promises, as in the snare:
 | `wave` / `phase` | `"sine"` or `"square"` / `"strike"` or `"free"` |
 | `damping`, `bloom` | 0 – 3, with (20 kHz / f_ref)^damping and (20 kHz / f_ref)^bloom ≤ 1000 |
 | `chatter` / `chatter_hz` | 0 – 1 / 10 – 4,000 |
+| storage `bits` / `rate_hz` / `filter_hz` | 0 or 2 – 16 / 4 – 96 kHz / 1 – 20 kHz |
 | `grains_hz` / `grain_ms` | 0 – 4,000 / 1 – 1,000, with grains_hz · grain_ms / 1000 ≤ 64 collisions ringing at once |
 | source `level_db` | −inf, or −90 – +24 |
 | drive | 0 – 48 dB |
@@ -561,7 +588,7 @@ $$\text{predicted}=C\,e^{-\pi^2/q_{\mathrm{knee}}}\,P+B_{\mathrm{kink}}\;\le\;10
   4. **Carriers at knots.** Values and slopes come from the table through the interpolator's own windowed sinc, evaluated as a continuous function at the knot's exact time: accurate to 10⁻¹³ of the carrier's RMS in value and 10⁻¹² of its RMS slope (measured). The bound is still inflated by 1%, as on the snare, whose cubic interpolation was accurate only to 1.6·10⁻⁶ in value and 10⁻⁴ in slope.
 
   The interpolator's own error, below 10⁻¹³ of each carrier's RMS, is 160 dB under the criterion and needs no term. §8.1 tests it.
-- **C** started at the snare's frozen 0.5 and was refit on this grid as the smallest value that covers every converged fixture with at least 6 dB of margin: 0.356 at 32×, frozen as 0.36. The same form would need 0.85 at 16×, where 4 kHz chatter under drive sets it, so C belongs to the K it was fitted at.
+- **C** started at the snare's frozen 0.5 and was refit on this grid as the smallest value that covers every converged fixture with at least 6 dB of margin: 0.356 at 32×, frozen as 0.36, then 0.756 once storage joined the grid, frozen as 0.76. The same form would need 0.85 at 16×, where 4 kHz chatter under drive sets it, so C belongs to the K it was fitted at.
 - **If the grid finds a mechanism the rule misses**, the rule gains a term before anything is frozen.
 - **The rule is evaluated per render**, and therefore per take and per channel.
 
@@ -864,7 +891,7 @@ It installs with pip as one package with a `cymbal` command, and its tests run o
 | `wav.py` | RIFF writing and reading, float and PCM, mono and stereo |
 | `audition.py` | Tempo, subdivisions and patterns, chokes, beds, A/B and blind order, watching, takes, stereo, playback |
 | `cli.py` | Commands |
-| `data/` | Frozen decimators and interpolators with checksums, the thirteen references |
+| `data/` | Frozen decimators and interpolators with checksums, the twenty-eight references |
 | `tools/` | `design_decimator.py`, `design_interpolator.py`, `grid.py`, `headroom.py`, `references.py`, `neighbourhoods.py`, `bench.py`, `golden.py` |
 | `tests/` | The test suite, including the grid-evidence test |
 | `docs/` | `GUIDE.md` for users: the workflow, every control, recipes, kits and chokes, reading the report; `VALIDATION.md` and `BENCHMARK.md` for the evidence |

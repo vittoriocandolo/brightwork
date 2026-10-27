@@ -35,11 +35,20 @@ The first public release.
   rule.
 - Frozen minimum-phase decimators and linear-phase interpolators for the
   44.1 and 48 kHz families, verified by checksum.
-- Thirteen references to start from, matched in loudness and sharing one
-  output setting: `closed`, `open`, `pedal`, `crash`, `ride`, `bell`,
-  `analog`, `shaker` and `tambourine`, and four voiced for trance, tech house
-  and the two ends of the axis from machine to band: `offbeat`, `tight`,
-  `dead` and `wash`.
+- Storage: a drum machine's sample memory, opt-in. The sources are stored at
+  a rate the internal rate divides, rounded to a few bits against their peak
+  without dither, and played back through a held DAC and a Gaussian low-pass,
+  delayed so that it never answers before its input; the damper is its
+  decay. The playback is smooth and exact, so storage leaves the
+  validated domain to the damper and the drive.
+- Twenty-eight references to start from, matched in loudness and sharing one
+  output setting: the hats `closed`, `open`, `pedal`, `half-open`, `analog`,
+  `analog-open`, `machine-closed` and `machine-open`; the cymbals `crash`,
+  `ride`, `bell`, `analog-cymbal`, `sizzle`, `china` and `splash`; the tops
+  `shaker` and `tambourine`; and, voiced for house, tech house, trance and
+  the two ends of the axis from machine to band, `house-open`,
+  `house-ride`, `house-tamb`, `tight`, `top`, `shaker-16`, `offbeat`,
+  `trance-ride`, `trance-crash`, `dead` and `wash`.
 - Patches in TOML, read as UTF-8 or UTF-16, with every field required, every
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `pitch` by semitones or to a

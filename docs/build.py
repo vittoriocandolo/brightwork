@@ -61,6 +61,21 @@ DESCRIPTIONS = {
     "tight": "Tech house's closed hat: shorter and a little darker than the closed hat.",
     "dead": "A damped hat, as with a towel over the plates: dark, its highs gone at once.",
     "wash": "A ride washed with a soft mallet: its highs swell after the strike and ring for seconds.",
+    "house-open": "House's off-beat open hat: darker and longer than trance's, sizzling as its plates slap.",
+    "house-ride": "House's ride: a bright ping over a short wash.",
+    "house-tamb": "A crisp tambourine stroke for the off-beat: jingles ringing, then a short shiver.",
+    "shaker-16": "A short shaker stroke for sixteenths.",
+    "top": "Tech house's top: a closed hat whose plates rattle.",
+    "trance-crash": "The crash on the drop: long and bright, its highs blooming after the strike.",
+    "trance-ride": "A driving ride: bright wash, bright ping.",
+    "analog-open": "The drum machine's analog squares, open.",
+    "analog-cymbal": "The analog squares as their cymbal, through a wider band.",
+    "machine-closed": "A closed hat stored as a drum machine stored it: 6 bits at 32 kHz, its decay the damper.",
+    "machine-open": "The same machine's open hat: 6 bits at 32 kHz, a fading tail turning grainy.",
+    "half-open": "A half-open hat: its plates slapping as they touch.",
+    "sizzle": "A ride with rivets buzzing against the plate through its wash.",
+    "china": "A china: trashy and quick, its plates slapping.",
+    "splash": "A splash: small and bright.",
 }
 
 STYLE = """<style>

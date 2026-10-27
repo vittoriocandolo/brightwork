@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .spectrum import MAX_COMPRESSION, MAX_SEED, MAX_TAKE, TOP_HZ, grid_bin, layout, worst_compression
+from .storage import tail_s
 
 if TYPE_CHECKING:
     import os
@@ -44,6 +45,9 @@ SAMPLE_RATES = (44100, 48000, 88200, 96000)
 FORMATS = ("float32", "pcm24", "pcm16")
 WAVES = ("sine", "square")
 PHASES = ("strike", "free")
+STORAGE_BITS = (0, *range(2, 17))  # 0: no storage
+STORAGE_RATES_HZ = (4000.0, 96000.0)
+STORAGE_FILTERS_HZ = (1000.0, 20000.0)
 MAX_GRAINS_HZ = 4000.0  # collisions per second
 MIN_GRAIN_MS, MAX_GRAIN_MS = 1.0, 1000.0  # how long a collision rings
 MAX_OVERLAP = 64.0  # collisions ringing at once, at the shape's peak
@@ -112,6 +116,15 @@ class Tone:
 
 
 @dataclass(frozen=True)
+class Storage:
+    """Low-resolution storage, as in a drum machine's sample memory: off at 0 bits."""
+
+    bits: int  # 0: off; else 2 … 16
+    rate_hz: float  # the rate the sound is stored at, as near as the internal rate's divisors allow
+    filter_hz: float  # the playback low-pass's −3 dB point
+
+
+@dataclass(frozen=True)
 class Damper:
     """The damper, which multiplies every source: no knots, or a curve from 1 down to 0."""
 
@@ -144,6 +157,7 @@ class Patch:
     take: int
     noise: tuple[Noise, ...]
     tone: tuple[Tone, ...]
+    storage: Storage
     damper: Damper
     drive: Drive
     output: Output
@@ -165,10 +179,13 @@ class Patch:
     def length_ms(self) -> float:
         """T_src: the latest end among the sub-bands of the audible sources, never after the damper (plan §3).
 
-        Silent sources never lengthen the sound. With nothing audible the length is 0.
+        Silent sources never lengthen the sound. With nothing audible the length is 0. Storage plays back a held
+        period and its filter's delay longer than the sources.
         """
         ends = [max(sub_band_ends(s)) for _, s in self.sources if s.level_db > -math.inf]
         end = max(ends, default=0.0)
+        if ends and self.storage.bits:
+            end += 1000 * tail_s(self.storage)
         if self.damper.amp:
             end = min(end, self.damper.amp[-1][0])
         return end
@@ -334,6 +351,7 @@ def _validate(p: Patch, problems: _Problems) -> None:
             _validate_noise(s, f"noise[{j}]", problems)
         for j, t in enumerate(p.tone, 1):
             _validate_tone(t, f"tone[{j}]", problems)
+    _validate_storage(p.storage, problems)
     _validate_damper(p.damper, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
@@ -447,6 +465,16 @@ def _validate_damper(d: object, problems: _Problems) -> None:
             problems.add(f"damper.amp[{i + 1}].gain", "a damper never increases")
 
 
+def _validate_storage(s: object, problems: _Problems) -> None:
+    """Check the storage: off, or a bit depth with its rate and its playback filter."""
+    if not isinstance(s, Storage):
+        problems.add("storage", "expected a storage section")
+        return
+    problems.integer("storage.bits", s.bits, STORAGE_BITS)
+    problems.number("storage.rate_hz", s.rate_hz, *STORAGE_RATES_HZ)
+    problems.number("storage.filter_hz", s.filter_hz, *STORAGE_FILTERS_HZ)
+
+
 def _validate_drive(d: object, problems: _Problems) -> None:
     """Check the drive."""
     if not isinstance(d, Drive):
@@ -471,9 +499,10 @@ def _validate_output(o: object, problems: _Problems) -> None:
 
 _COMMON = ("band_hz", "damping", "bloom", "chatter", "chatter_hz", "grains_hz", "grain_ms", "amp")
 _FIELDS = {
-    "": ("instrument", "schema", "seed", "take", "noise", "tone", "damper", "drive", "output"),
+    "": ("instrument", "schema", "seed", "take", "noise", "tone", "storage", "damper", "drive", "output"),
     "noise": ("level_db", "band_hz", "spacing_hz", *_COMMON[1:]),
     "tone": ("level_db", "wave", "phase", "partials", *_COMMON),
+    "storage": ("bits", "rate_hz", "filter_hz"),
     "damper": ("amp",),
     "drive": ("db",),
     "output": ("sample_rate", "format", "mode", "db", "polarity"),
@@ -615,6 +644,13 @@ def _sources[S: (Noise, Tone)](
     return None if any(b is None for b in built) else tuple(b for b in built if b is not None)
 
 
+def _storage(problems: _Problems, data: dict[str, Any]) -> Storage | None:
+    """Build the storage section; None after reporting what is wrong."""
+    if "storage" not in data or (t := _section(problems, "storage", data["storage"], _FIELDS["storage"])) is None:
+        return None
+    return Storage(t["bits"], _float(t["rate_hz"]), _float(t["filter_hz"]))
+
+
 def _damper(problems: _Problems, data: dict[str, Any]) -> Damper | None:
     """Build the damper section; None after reporting what is wrong."""
     if "damper" not in data or (t := _section(problems, "damper", data["damper"], _FIELDS["damper"])) is None:
@@ -646,14 +682,15 @@ def from_dict(data: object) -> Patch:
     _keys(problems, "", data, _FIELDS[""], _OPTIONAL)
     noise = _sources(problems, data, "noise", _noise)
     tone = _sources(problems, data, "tone", _tone)
-    damper, drive, output = _damper(problems, data), _drive(problems, data), _output(problems, data)
-    if noise is None or tone is None or damper is None or drive is None or output is None:
+    storage, damper = _storage(problems, data), _damper(problems, data)
+    drive, output = _drive(problems, data), _output(problems, data)
+    if noise is None or tone is None or storage is None or damper is None or drive is None or output is None:
         raise PatchError(problems or ["invalid patch"])
     if "seed" not in data or "take" not in data:
         raise PatchError(problems)
     # Every part is there, so every value is checked as well, and all the problems are reported together.
     try:
-        p = Patch(data["seed"], data["take"], noise, tone, damper, drive, output)
+        p = Patch(data["seed"], data["take"], noise, tone, storage, damper, drive, output)
     except PatchError as e:
         raise PatchError(problems + list(e.problems)) from None
     if problems:
@@ -727,6 +764,8 @@ def to_dict(p: Patch) -> dict[str, Any]:
             }
             for s in p.tone
         ]
+    st = p.storage
+    out["storage"] = {"bits": st.bits, "rate_hz": st.rate_hz, "filter_hz": st.filter_hz}
     out["damper"] = {"amp": _knots_dict(p.damper.amp)}
     out["drive"] = {"db": p.drive.db}
     o = p.output
@@ -781,6 +820,15 @@ def dumps(p: Patch) -> str:
         )
         lines += _rows([("band_hz", _band_text(t.band_hz), ""), *_common_rows(t)])
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in t.amp], "shape: 0 at both ends, peak exactly 1")
+    st = p.storage
+    lines += ["", _note("[storage]", "a drum machine's sample memory: the sources stored, then played back")]
+    lines += _rows(
+        [
+            ("bits", str(st.bits), "0 = off; else 2 … 16, quantized against the sound's peak"),
+            ("rate_hz", _f(st.rate_hz), "stored at this rate, as near as the internal rate allows"),
+            ("filter_hz", _f(st.filter_hz), "played back through a low-pass, −3 dB here"),
+        ],
+    )
     lines += ["", _note("[damper]", "multiplies every source: 1 until damped, then 0")]
     if p.damper.amp:
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in p.damper.amp], "from 1 down to 0")

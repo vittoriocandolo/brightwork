@@ -8,9 +8,7 @@ evidence are in [DESIGN.md](DESIGN.md) and [VALIDATION.md](VALIDATION.md).
 ## The workflow
 
 1. **Start from the nearest reference.** `brightwork init closed > closed.toml`.
-   The references are `closed`, `open`, `pedal`, `crash`, `ride`, `bell`,
-   `analog`, `shaker`, `tambourine`, `offbeat`, `tight`, `dead` and `wash`
-   (below).
+   There are twenty-eight, from `closed` to `splash` (below).
 2. **Voice it in a pattern, over your loop.**
    `brightwork audition closed.toml open.toml --watch --bpm 120 --every 1/8 --pattern 1,1,2,1 --choke 2:1 --with groove.wav`
    plays three closed hits and an open one per half bar, the open hat choked
@@ -49,6 +47,21 @@ spectrum and drive headroom.
 | `tight` | Tech house's closed hat: plates over 5.5–14 kHz, 65 ms, shorter and darker than `closed` | `stretch`, the plates' band |
 | `dead` | A damped hat, a towel over the plates: dark (2.5–10 kHz) with damping 2, its highs gone at once, 140 ms | damping, to take the towel off |
 | `wash` | A ride washed with a soft mallet: a 15 ms rise, highs that swell after it (bloom 0.6), 7 s | bloom, the band, `choke` |
+| `house-open` | House's off-beat open hat: darker and longer than `offbeat`, sizzling as its plates slap, about half a second | `choke` on the next 16th, chatter |
+| `house-ride` | House's ride: a bright ping over a short wash, 1.2 s | the ping's level, the wash's band |
+| `house-tamb` | A crisp tambourine stroke for the off-beat: jingles ringing, a short shiver, 220 ms | the shiver's `stretch` and rate |
+| `shaker-16` | A short shaker stroke for sixteenths, 110 ms | `stretch`, the grains' rate |
+| `top` | Tech house's top: a closed hat whose plates rattle, 200 ms | the rattle's level and rate |
+| `trance-crash` | The crash on the drop: long and bright, its highs blooming, 6 s | bloom, `stretch`, `choke` |
+| `trance-ride` | A driving ride: bright wash and ping, 3.5 s | the bands, the ping's level |
+| `analog-open` | The analog squares, open: 450 ms | `pitch`, `stretch`, the band |
+| `analog-cymbal` | The analog squares as their cymbal, through a wider band, 1.3 s | `pitch`, `stretch`, damping |
+| `machine-closed` | A cymbal's closed hat stored as a drum machine stored it: 6 bits at 32 kHz, played back through an 11 kHz low-pass, the damper as its decay | `storage.bits`, the damper |
+| `machine-open` | The same machine's open hat, its decay the damper | the damper's `stretch`, `storage.rate_hz` |
+| `half-open` | A half-open hat: its plates slapping at 150 Hz as they touch, 500 ms | chatter, `choke` |
+| `sizzle` | A ride with rivets buzzing against the plate through its wash, 6 s | the rivets' level and rate |
+| `china` | A china: trashy and quick, its plates slapping, 2.4 s | the band, chatter, `choke` |
+| `splash` | A splash: small, bright, modes 34 Hz apart, 900 ms | `stretch`, the band |
 
 They are matched in loudness (−32.5 LUFS; the analog hat −33.1) and peak
 below −1 dBFS, so you can compare them fairly, and they share one output
@@ -178,6 +191,26 @@ at each one is the source itself, its band, modes or partials.
 | Tambourine jingles | modes, 2.5–12 kHz, spacing 100–150 Hz | 100–300 | 50–120 |
 | Sizzle on a cymbal | a second source on the cymbal's modes | 200–400 | 10–30 |
 
+### Storage
+
+`[storage]` stores the whole sound as a drum machine's memory did, on
+purpose: `bits` above 0 turns it on.
+
+- `bits`, 2 to 16, is how fine each stored value is, against the sound's own
+  peak: 6 bits is the TR-909's hats, about 36 dB of range, so a fading cymbal
+  turns grainy as its tail sinks into the steps.
+- `rate_hz`, 4 to 96 kHz, is how often the sound is stored, at the nearest
+  rate the internal rate allows, which the report names. Below about 40 kHz
+  the hold's images reach into hearing, and what lies above half the rate
+  folds down.
+- `filter_hz`, 1 to 20 kHz, is the playback low-pass, −3 dB there, gentle as
+  an analog one: lower is darker.
+- The damper then fades the playback, grain and all, as the machine's decay
+  knob did: `brightwork stretch PATCH damper.amp 1.5` opens it.
+
+The sources are synthesized as always and stored as they sound, so any
+patch, a ride or a shaker as well as a hat, can be stored.
+
 ### Damper
 
 `damper.amp` multiplies every source: 1 until damped, then down to 0 at its
@@ -294,7 +327,7 @@ length   120.0 ms source, 121.9 ms exported (5851 samples at 48000 Hz, float32, 
 peak     -7.90 dBFS sample, -7.42 dBTP true
 loudness -32.8 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -141 dB, margin 40.6 dB
-         mostly kinks, 52% at noise[2].amp[2] (0.03 ms); drive headroom +26.2 dB
+         mostly kinks, 52% at noise[2].amp[2] (0.03 ms); drive headroom +25.6 dB
 render   178 ms
 ```
 
@@ -458,8 +491,6 @@ if not pack.over(kit):
 - Performance: rolls, swells, bowing, brushes and the continuous pedal of an
   electronic hi-hat. One patch is one hit; openness is a set of articulations
   and dynamics are velocity layers.
-- Sounds defined by processing or storage: rooms and reverb, filtering after
-  the fact, and the 6-bit cymbal samples of machines such as the TR-909.
+- Sounds defined by processing: rooms and reverb, and filtering after the
+  fact. A drum machine's sample memory is in the family: see Storage.
 - FM or wavetable metallics, though coherent sources can approach them.
-  Rivet and sizzle cymbals have no reference yet, though a rattle on a
-  cymbal's modes approaches them.

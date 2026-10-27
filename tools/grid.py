@@ -52,13 +52,14 @@ FLOOR = 1e-7
 LIMIT_DB = -100.0  # the rendering accuracy every fixture inside the domain meets
 CONVERGED_DB = -120.0  # how far below that a reference must agree with its check
 DEEP_FLOOR_DB = -200.0  # below which two references agree to rounding
-ROUNDING = 1e-15  # of the peak: an error the kink bound need not cover
+ROUNDING = 1e-12  # of the peak: rounding, which neither term need cover; a stored sound's playback rounds near 1e-13
 RANDOM_FIXTURES = 220
 REPORT_EVERY = 25  # fixtures between progress lines
 DEEP_EVERY = 10  # every tenth fixture is also checked at 512 × base
 TOP_HZ = 20000.0
 DAMPED = 0.2  # the share of random fixtures that a damper chokes
 RATTLING = 0.3  # the share of random sources that rattle
+STORING = 0.2  # the share of random fixtures that are stored
 
 
 def say(text: str) -> None:
@@ -150,6 +151,7 @@ BASE = {
     "seed": 1,
     "take": 1,
     "noise": [noise(-2, (6000, 16000)), noise(-10, (3000, 18000), 0.0, TICK, damping=0.0)],
+    "storage": {"bits": 0, "rate_hz": 32000.0, "filter_hz": 16000.0},
     "damper": {"amp": []},
     "drive": {"db": 0.0},
     "output": {"sample_rate": 48000, "format": "float32", "mode": "gain", "db": 0.0, "polarity": 1},
@@ -212,7 +214,7 @@ def fixtures() -> list[Fixture]:
         if valid(edits):
             out.append((family, name, edits))
 
-    for family in (_noise, _damping, _chatter, _ticks, _tones, _chokes, _layers, _dynamics, _rattles):
+    for family in (_noise, _damping, _chatter, _ticks, _tones, _chokes, _layers, _dynamics, _rattles, _storage):
         family(add)
     _seeds(add, out)
     _rates(add)
@@ -286,6 +288,42 @@ def _rattles(add: Add) -> None:
     head = tone(-6, (180.0, 290.0), (100, 2000), shake, wave="sine", phase="strike", grains_hz=150, grain_ms=30)
     for drive in (0, 12, 24):
         add("rattles", f"tambourine-d{drive}", noise=[jingles], tone=[head], **{"drive.db": float(drive)})
+
+
+def _storage(add: Add) -> None:
+    """Add bits × storage rate × playback filter over the hat's plates, undriven and under 24 dB of drive.
+
+    And a long ring, choked, and the analog squares, each stored.
+    """
+    for bits in (4, 6, 8, 12):
+        for rate in (12000, 32000, 64000):
+            for cutoff in (4000, 12000, 20000):
+                for drive in (0, 24):
+                    add(
+                        "storage",
+                        f"b{bits}-r{rate}-f{cutoff}-d{drive}",
+                        noise=[noise(0, (6000, 16000))],
+                        **{"storage.bits": bits, "storage.rate_hz": float(rate), "storage.filter_hz": float(cutoff)},
+                        **{"drive.db": float(drive)},
+                    )
+    stored = {"storage.bits": 6, "storage.rate_hz": 32000.0, "storage.filter_hz": 12000.0}
+    for drive in (0, 24):
+        choked = amp((60, 1), (65, 0.3), (75, 0))
+        add(
+            "storage",
+            f"choked-d{drive}",
+            noise=[noise(0, (6000, 16000), shape=LONG)],
+            **stored,
+            **{"damper.amp": choked, "drive.db": float(drive)},
+        )
+        add(
+            "storage",
+            f"analog-d{drive}",
+            noise=[],
+            tone=[tone(0, ANALOG, (7000, 16000))],
+            **stored,
+            **{"drive.db": float(drive)},
+        )
 
 
 def _ticks(add: Add) -> None:
@@ -379,7 +417,7 @@ def _dynamics(add: Add) -> None:
             except patch.PatchError:
                 continue  # `softer` refuses rather than clamps; the references are voiced to take the ladder
             d["output"]["db"] = 0.0
-            fields = {k: d[k] for k in ("seed", "take", "damper", "drive", "output")}
+            fields = {k: d[k] for k in ("seed", "take", "storage", "damper", "drive", "output")}
             add("dynamics", f"{name}-softer{db}", noise=d.get("noise", []), tone=d.get("tone", []), **fields)
 
 
@@ -417,9 +455,14 @@ def _random(out: list[Fixture]) -> None:
     """Add a seeded random sample of the whole valid domain, every fixture sounding."""
     rng = np.random.default_rng(2026)
     rattles = np.random.default_rng(2027)  # its own stream, so the fixtures drawn before rattles keep their draws
+    stores = np.random.default_rng(2028)  # and storage too
     made = 0
     while made < RANDOM_FIXTURES:
         e = random_edits(rng)
+        if stores.uniform() < STORING:
+            e["storage.bits"] = int(stores.integers(2, 17))
+            e["storage.rate_hz"] = float(10 ** stores.uniform(math.log10(4000), math.log10(96000)))
+            e["storage.filter_hz"] = float(10 ** stores.uniform(3, math.log10(20000)))
         for source in [*e["noise"], *e["tone"]]:
             if rattles.uniform() < RATTLING:
                 ring = float(10 ** rattles.uniform(0, 2.3))
@@ -684,7 +727,7 @@ def fit_saturation(rows: Iterable[Row]) -> tuple[float, Row | None]:
     """
     need, worst = 0.0, None
     for r in rows:
-        if r["converged"] and r["saturation"] > 0 and r["max_abs"] > r["kink"]:
+        if r["converged"] and r["saturation"] > 0 and r["max_abs"] > max(r["kink"], ROUNDING * r["peak"]):
             c = 2 * (r["max_abs"] - r["kink"]) / r["saturation"]
             if c > need:
                 need, worst = c, r
@@ -715,8 +758,9 @@ def _inside(rows: list[Row]) -> None:
     if loud:
         w = max(loud, key=lambda r: r["e_max"])
         say(f"  worst error inside: E_max {w['e_max']:.1f} dB ({w['family']}/{w['name']})")
-        m = min(loud, key=lambda r: 20 * math.log10(r["predicted"] / r["max_abs"]) if r["max_abs"] > 0 else INF)
-        if m["max_abs"] > 0:
+        measured = [r for r in loud if r["max_abs"] > ROUNDING * r["peak"]]  # an error above rounding
+        if measured:
+            m = min(measured, key=lambda r: r["predicted"] / r["max_abs"])
             above = 20 * math.log10(m["predicted"] / m["max_abs"])
             say(f"  least conservative inside: predicted {above:.1f} dB above measured ({m['family']}/{m['name']})")
 

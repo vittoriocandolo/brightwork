@@ -8,8 +8,8 @@ $$x(t)=\sum_{j}g_j\,D(t)\,G_j(t)\sum_{b}e_j\big(\tau_{jb}(t)\big)\,c_{jb}(t),\qq
 j counts the sources, noise and tones alike, each with its gain g_j. c_jb is
 sub-band b of a source's carrier, a fixed spectrum of lines, and e_j∘τ_jb its
 shape on that sub-band's time map, which carries damping and bloom. G_j is the
-source's gate, its chatter and, if it rattles, its collisions; D is the
-damper; S_α the drive; h the frozen decimator of the rate's family, F the
+source's gate, its chatter and, if it rattles, its collisions; with storage
+on, their sum is stored and played back before the damper; D is the damper; S_α the drive; h the frozen decimator of the rate's family, F the
 internal rate, K the decimation factor, g_out the output gain and p the
 polarity.
 
@@ -27,6 +27,7 @@ was carried over from the kick and the snare, and the decisions still open;
 - [Damping and bloom](#damping-and-bloom)
 - [Chatter](#chatter)
 - [Rattles](#rattles)
+- [Storage](#storage)
 - [The damper](#the-damper)
 - [The drive](#the-drive)
 - [Rates, carriers and the decimator](#rates-carriers-and-the-decimator)
@@ -170,6 +171,35 @@ rings at each collision is the source itself.
 At most 64 collisions ring at once; past that a rattle sounds as the plain
 source. Every collision's knots are kinks that the validated domain counts.
 
+## Storage
+
+`[storage]` models the sample memory of the drum machines of the eighties,
+which kept recordings of acoustic cymbals in a few bits at a few tens of
+kilohertz, read them out through a DAC that holds each value, filtered them
+and shaped them with a VCA. It is off at `bits = 0`, and on any patch:
+
+- **Stored.** The sum of the gated sources, before the damper, is taken at
+  every D-th internal sample, D = round(F / `rate_hz`): the storage rate is
+  F / D, which the report names. Nothing filters it first, so what lies above
+  half that rate folds down.
+- **Quantized.** Each value is rounded to `bits` bits against the stored
+  sound's own peak, without dither. The noise left sits a fixed distance
+  under the peak, about 6 dB per bit, so a decaying cymbal turns grainy as it
+  fades.
+- **Played back.** Each value is held for one storage period and smoothed by
+  a Gaussian low-pass, −3 dB at `filter_hz`, delayed by 8σ so that it never
+  answers before its input. Hold and Gaussian are a closed form through erf,
+  smooth and nil far above the filter's frequency, so the playback adds no
+  kinks and nothing for the internal rate to alias; the sound lasts one
+  period and the filter's delay longer than its sources.
+- **Damped.** The damper multiplies the playback, as the machine's VCA did:
+  stretching it is the decay knob.
+
+The stored values are part of the model: `verify` plays back the very values
+the render stored, since a value a hair from a rounding threshold could
+round the other way at another rate. Storage then leaves the validated
+domain only the damper's kinks and the drive to judge.
+
 ## The damper
 
 The damper multiplies every source after its sub-bands, so a hand on a crash
@@ -218,7 +248,7 @@ error against a reference render is demonstrated below −100 dB:
 $$C\,e^{-\pi^2/q_{\mathrm{knee}}}\,P+B_{\mathrm{kink}}\;\le\;10^{-5}\,P$$
 
 P is the output peak, q_knee the largest step of the driven signal near the
-saturator's knee, and C = 0.36 the constant refit on the adversarial grid.
+saturator's knee, and C = 0.76 the constant refit on the adversarial grid.
 B_kink bounds the aliasing of every knot from first principles, from the
 jumps in the second and third derivatives at each knot of every sub-band,
 gate, collision and the damper, carried through the saturator. The report
@@ -314,6 +344,7 @@ stays the evidence for this code.
 | `carrier.py` | tables, the frozen interpolators, and carriers at any instant |
 | `curve.py` | Hermite curves and their time maps |
 | `rattle.py` | collisions: their draw, their strength and their exact evaluation |
+| `storage.py` | storage: the stored values, their rounding, and their smooth playback |
 | `voice.py` | the internal signal, the saturator, and what the validated domain needs: the knee slew and every kink |
 | `render.py` | the decimators, synthesis, the validated domain and drive headroom, sets, the true peak and the report |
 | `reference.py` | the reference method of `verify` and the grid |

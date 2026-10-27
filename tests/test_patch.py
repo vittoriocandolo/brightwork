@@ -152,6 +152,11 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
         take=int(rng.integers(1, 2**31)),
         noise=tuple(noise),
         tone=tuple(tones),
+        storage=patch.Storage(
+            int(rng.choice(patch.STORAGE_BITS)),
+            float(rng.uniform(*patch.STORAGE_RATES_HZ)),
+            float(rng.uniform(*patch.STORAGE_FILTERS_HZ)),
+        ),
         damper=patch.Damper(damper),
         drive=patch.Drive(float(rng.uniform(0, 48))),
         output=patch.Output(
@@ -245,7 +250,7 @@ def test_unknown_and_missing_fields(example_dict: dict[str, Any]) -> None:
 
 def test_every_field_is_required_but_the_source_arrays(example_dict: dict[str, Any]) -> None:
     """Require every field, and at least one source, but neither source array."""
-    for section in ("damper", "drive", "output"):
+    for section in ("storage", "damper", "drive", "output"):
         for key in list(example_dict[section]):
             d = dict(example_dict)
             d[section] = {k: v for k, v in example_dict[section].items() if k != key}
@@ -486,6 +491,7 @@ def test_programmatic_parts_must_have_their_types() -> None:
     cases: list[tuple[dict[str, object], str]] = [
         ({"noise": [p.noise[0]]}, "noise: expected noise sources"),
         ({"tone": (p.noise[0],)}, "tone: expected tone sources"),
+        ({"storage": None}, "storage: expected a storage section"),
         ({"damper": None}, "damper: expected a damper section"),
         ({"drive": None}, "drive: expected a drive section"),
         ({"output": None}, "output: expected an output section"),

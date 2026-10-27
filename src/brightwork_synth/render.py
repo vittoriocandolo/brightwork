@@ -38,6 +38,7 @@ from . import __version__, carrier, spectrum, wav
 from .loudness import momentary_max
 from .patch import Noise, Patch, Tone, describe_pitch, dumps
 from .spectrum import MAX_TAKE
+from .storage import divider
 from .voice import (
     Kinks,
     Slew,
@@ -71,9 +72,9 @@ FAMILY = {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
 # where q is the knee slew and P the output peak. A render is inside when that
 # is at most LIMIT · P, or FLOOR when it is near-silent. SATURATION is the
 # smallest value that covers every converged fixture of the adversarial grid at
-# K = 32 with 6 dB of margin, 0.356, rounded up; the same form would need 0.85
+# K = 32 with 6 dB of margin, 0.756, rounded up; the same form would need 0.85
 # at 16×, so it belongs to this K.
-SATURATION = 0.36
+SATURATION = 0.76
 LIMIT = 1e-5  # −100 dB of the peak
 FLOOR = 1e-7  # the absolute bound for near-silent renders
 QUIET = 1e-2  # below this peak the absolute bound applies
@@ -364,9 +365,9 @@ def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis
     ip = interpolator_for(p.output.sample_rate, k)
     tabs = tables(v, ip.rate)
     n = sample_count(v.t_src, rate)
-    x, y, slew = internal(v, rate, n, ip, tabs)
+    x, y, slew, stored = internal(v, rate, n, ip, tabs)
     band = FAMILY[p.output.sample_rate] / 2
-    kinks = kink_terms(v, ip, tabs)
+    kinks = kink_terms(v, ip, tabs, stored)
     out = decimate(taps, y, factor, k)
     peak = true_peak(y, taps)
     del y
@@ -735,6 +736,7 @@ class Report:
     decimator: str
     interpolator: str | None
     render_s: float
+    storage: str | None = None  # how the sound was stored, when it was
 
     @property
     def peak(self) -> float:
@@ -820,6 +822,8 @@ class Report:
             f"({self.samples} samples at {self.sample_rate} Hz, {pcm}, {channels}), seed {self.seed}, {takes}"
         )
         rows.append(("length", length))
+        if self.storage is not None:
+            rows.append(("storage", self.storage))
         if len(self.files) == 1:
             peak, loudness = self._levels(self.files[0])
             rows += [("peak", peak), ("loudness", loudness)]
@@ -986,8 +990,21 @@ def render_takes(
         decimator=decimator(base).sha256,
         interpolator=interpolator_for(p.output.sample_rate).sha256,
         render_s=time.perf_counter() - start,
+        storage=storage_line(p, synths[0].rate),
     )
     return audio, report
+
+
+def storage_line(p: Patch, rate: int) -> str | None:
+    """Describe how the sound was stored, at the rate the internal rate's divider gives; None without storage."""
+    st = p.storage
+    if not st.bits:
+        return None
+    d = divider(rate, st.rate_hz)
+    return (
+        f"{st.bits} bits at {rate / d:.6g} Hz (the internal rate / {d}), quantized against the sound's peak, "
+        f"played back through a low-pass at {st.filter_hz:g} Hz"
+    )
 
 
 def render(p: Patch) -> tuple[NDArray[np.float32], Report]:

@@ -29,7 +29,7 @@ INSIDE = 450  # fixtures inside the domain, at least
 INSIDE_DB = -105.0  # the worst error inside, with room under the −100 dB criterion
 UNDRIVEN = 300  # undriven fixtures that test the kink bound, at least
 DRIVEN = 100  # driven ones where the kinks dominate, at least
-ROUNDING = 1e-15  # of the peak: an error the kink bound need not cover, rounding alone
+ROUNDING = 1e-12  # of the peak: rounding alone, which neither term need cover; stored playback rounds near 1e-13
 FAR_OUTSIDE_DB = -20.0  # an unconverged reference lies at least this far outside
 DEEP_CHECKS = 80  # fixtures checked at 512 × base, at least
 DEEP_FLOOR_DB = -200.0  # below which two references agree to rounding
@@ -49,6 +49,7 @@ FAMILIES = {
     "layers",
     "dynamics",
     "rattles",
+    "storage",
     "seeds",
     "rates",
     "random",

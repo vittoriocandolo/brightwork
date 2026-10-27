@@ -94,7 +94,7 @@ ignore = [
     "D203",  # contradicts D211: no blank line before a class docstring
     "D213",  # contradicts D212: a multi-line docstring's summary starts on its first line
 ]
-allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "′"]  # math notation
+allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "σ", "′"]  # math notation
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # pytest checks with assert, and rewrites it so that it also runs under python -O

@@ -1,0 +1,65 @@
+instrument = "cymbal"
+schema = 1
+seed = 1                    # the cymbal: where its modes lie
+take = 1                    # the strike: round robins use take, take + 1, …
+
+[[noise]]                   # noise[1]
+level_db   = -12.8
+band_hz    = [5000.0, 15000.0]
+spacing_hz = 14.0           # mean distance between modes; 0 = continuous noise
+damping    = 0.5            # content at f decays (f / f_ref)^damping times faster
+bloom      = 0.1            # and rises (f / f_ref)^bloom times slower
+chatter    = 0.2            # 0 … 1: gated at chatter_hz, as plates that slap
+chatter_hz = 260.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
+amp = [                     # shape: 0 at both ends, peak exactly 1
+  { ms = 0.0,    gain = 0.0 },
+  { ms = 0.6,    gain = 1.0 },
+  { ms = 60.0,   gain = 0.5 },
+  { ms = 250.0,  gain = 0.16 },
+  { ms = 520.0,  gain = 0.05 },
+  { ms = 850.0,  gain = 0.016 },
+  { ms = 1300.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[2]
+level_db   = -20.8
+band_hz    = [3000.0, 16000.0]
+spacing_hz = 0.0            # mean distance between modes; 0 = continuous noise
+damping    = 0.0            # content at f decays (f / f_ref)^damping times faster
+bloom      = 0.0            # and rises (f / f_ref)^bloom times slower
+chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
+chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
+amp = [                     # shape: 0 at both ends, peak exactly 1
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.03, gain = 1.0 },
+  { ms = 0.13, gain = 0.6 },
+  { ms = 1.5,  gain = 0.1 },
+  { ms = 5.0,  gain = 0.0 },
+]
+
+[storage]                   # a drum machine's sample memory: the sources stored, then played back
+bits      = 6               # 0 = off; else 2 … 16, quantized against the sound's peak
+rate_hz   = 32000.0         # stored at this rate, as near as the internal rate allows
+filter_hz = 11000.0         # played back through a low-pass, −3 dB here
+
+[damper]                    # multiplies every source: 1 until damped, then 0
+amp = [                     # from 1 down to 0
+  { ms = 150.0, gain = 1.0 },
+  { ms = 300.0, gain = 0.3 },
+  { ms = 450.0, gain = 0.06 },
+  { ms = 600.0, gain = 0.0 },
+]
+
+[drive]
+db = 0.0                    # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -6.0          # gain in dB, or peak target in dBFS
+polarity    = 1

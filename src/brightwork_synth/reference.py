@@ -42,8 +42,8 @@ from scipy.fft import irfft, next_fast_len, rfft
 from scipy.signal import upfirdn
 
 from . import carrier
-from .render import FAMILY, Domain, K, db, decimator, domain, rates, synthesize, take_numbers
-from .voice import Model, gate, sample_count, saturate, tables, voice
+from .render import FAMILY, Domain, K, db, decimator, domain, interpolator_for, rates, synthesize, take_numbers
+from .voice import Model, gate, sample_count, saturate, stored_sound, tables, voice
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -81,12 +81,15 @@ def _carrier(tab: Floats, ip: carrier.Interpolator, a: int, b: int) -> Floats:
 
 def x_range(model: Model, rate: int, n0: int, n1: int, count: int) -> Floats:
     """Return x(n / rate) for n0 ≤ n < n1, and 0 outside 0 ≤ n < count: the same model as the shipping synthesis."""
-    v, ip, tabs = model
+    v, ip, tabs, stored = model
     x = np.zeros(n1 - n0)
     lo, hi = max(n0, 0), min(n1, count)
     if lo >= hi:
         return x
     t = np.arange(lo, hi) / rate
+    if stored is not None:  # the shipping render's stored values, played back at this rate
+        x[lo - n0 : hi - n0] = stored.play(rate, lo, hi) * (v.damper.on(t) if v.damper is not None else 1.0)
+        return x
     for s in v.audible:
         acc = np.zeros(hi - lo)
         for sb, tab in zip(s.subbands, tabs[s.path], strict=True):
@@ -150,7 +153,16 @@ def reference(
     ip = carrier.interpolator(base, multiple // 2)
     tabs = tables(v, ip.rate)
     n = sample_count(v.t_src, rate)
-    z = band_limited(Model(v, ip, tabs), rate, range(-GUARD, n + GUARD), multiple // k, workers or carrier.threads())
+    # Storage keeps what the shipping render stored: its rounding to a few bits is the model, not an error.
+    shipping = interpolator_for(p.output.sample_rate, k)
+    stored = stored_sound(v, rate, n, shipping, tables(v, shipping.rate)) if v.storage is not None else None
+    z = band_limited(
+        Model(v, ip, tabs, stored),
+        rate,
+        range(-GUARD, n + GUARD),
+        multiple // k,
+        workers or carrier.threads(),
+    )
     first = GUARD // factor  # GUARD is a multiple of every factor, so the output grid stays aligned
     out = upfirdn(taps, z, down=factor)[first : first + (n + taps.size - 2) // factor + 1]
     return Reference(out, z)

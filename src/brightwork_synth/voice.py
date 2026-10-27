@@ -29,8 +29,9 @@ from scipy.optimize import brentq
 
 from . import carrier, spectrum
 from .curve import Curve, amplitude_curve, mapped
-from .patch import Noise, Patch, Tone
+from .patch import Noise, Patch, Storage, Tone
 from .rattle import Grains, grains
+from .storage import Stored, store
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -114,6 +115,7 @@ class Voice:
     damper: Curve | None
     alpha: float
     t_src: float
+    storage: Storage | None = None  # the patch's storage when it is on
 
     @property
     def audible(self) -> tuple[Source, ...]:
@@ -122,11 +124,15 @@ class Voice:
 
 
 class Model(NamedTuple):
-    """What the internal signal is read from: the voice, the interpolator to the rate it is read at, and the tables."""
+    """What the internal signal is read from: the voice, the interpolator to the rate it is read at, and the tables.
+
+    With storage on, `stored` holds the sound as stored, which the playback reads instead of the sources.
+    """
 
     voice: Voice
     ip: carrier.Interpolator
     tables: Tables
+    stored: Stored | None = None
 
 
 def _shape(knots: Sequence[tuple[float, float]]) -> Curve:
@@ -201,7 +207,8 @@ def voice(p: Patch) -> Voice:
             Source(path, kind, spec, gain, shape, float(s.chatter), float(s.chatter_hz), collisions, lay, subbands),
         )
     damper = _shape(p.damper.amp) if p.damper.amp else None
-    return Voice(p.seed, p.take, tuple(sources), damper, drive_alpha(p.drive.db), p.length_ms / 1000)
+    storage = p.storage if p.storage.bits else None
+    return Voice(p.seed, p.take, tuple(sources), damper, drive_alpha(p.drive.db), p.length_ms / 1000, storage)
 
 
 def lines(spec: NoiseSpec | ToneSpec) -> carrier.Lines:
@@ -281,14 +288,14 @@ def gates(s: Source, t: Floats) -> tuple[Pair, Pair]:
     return chatter, (s.grains.value(t), s.grains.derivative(t))
 
 
-def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None) -> Floats:
-    """Return x[n] = x(n / rate) for 0 ≤ n < count.
+def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None, *, damped: bool = True) -> Floats:
+    """Return x[n] = x(n / rate) for 0 ≤ n < count; with `damped` off, the sources before the damper.
 
     Sources are added in patch order. Within a source, each fixed block sums its
     sub-bands in order, then takes the gate, the damper and the gain, so a
     sample never depends on how the blocks are shared among threads.
     """
-    v, ip, tabs = model
+    v, ip, tabs, _ = model
     x = np.zeros(count)
     workers = workers or carrier.threads()
     with carrier.single_threaded(), ThreadPoolExecutor(workers) as pool:
@@ -315,7 +322,7 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
                         c = carrier.block(tab, ip, b0)
                         acc[a - n0 : b - n0] += sb.env.on(t[a - n0 : b - n0]) * c[a - b0 : b - b0]
                 factor = s.gain * gate(s, n0, n1, rate)
-                if v.damper is not None:
+                if damped and v.damper is not None:
                     factor = factor * v.damper.on(t)
                 x[n0:n1] += factor * acc
 
@@ -452,16 +459,32 @@ def slew_of(x: Floats) -> Slew:
     return Slew(peak, Knees(crossing, r, s), crest, steep)
 
 
+def stored_sound(v: Voice, rate: int, count: int, ip: carrier.Interpolator, tabs: Tables) -> Stored | None:
+    """Return the sound as stored from the internal samples 0 ≤ n < count, or None without storage."""
+    if v.storage is None:
+        return None
+    return store(synthesize_x(Model(v, ip, tabs), rate, count, damped=False), rate, v.storage)
+
+
 def internal(
     v: Voice,
     rate: int,
     count: int,
     ip: carrier.Interpolator,
     tabs: Tables,
-) -> tuple[Floats, Floats, Slew]:
-    """Return (x, y, slew): the saturator's input and output at the internal samples 0 ≤ n < count."""
-    x = synthesize_x(Model(v, ip, tabs), rate, count)
-    return x, saturate(v.alpha, x), slew_of(x)
+) -> tuple[Floats, Floats, Slew, Stored | None]:
+    """Return (x, y, slew, stored): the saturator's input and output at the internal samples 0 ≤ n < count.
+
+    With storage on, the sources are stored, played back and damped; `stored` is the sound as stored.
+    """
+    stored = stored_sound(v, rate, count, ip, tabs)
+    if stored is None:
+        x = synthesize_x(Model(v, ip, tabs), rate, count)
+        return x, saturate(v.alpha, x), slew_of(x), None
+    x = stored.play(rate, 0, count)
+    if v.damper is not None:
+        x = x * v.damper.on(np.arange(count) / rate)
+    return x, saturate(v.alpha, x), slew_of(x), stored
 
 
 # The kink bound.
@@ -542,8 +565,14 @@ def _no_kinks() -> Kinks:
     return Kinks((), empty, empty, empty, empty, empty)
 
 
-def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables) -> Kinks:
-    """Return every term's jumps at every knot (plan §5): sub-band shapes, the gates and the damper."""
+def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables, stored: Stored | None = None) -> Kinks:
+    """Return every term's jumps at every knot (plan §5): sub-band shapes, the gates and the damper.
+
+    A stored sound is played back smoothly: what kinks its sources had is in what was stored, and only the damper
+    that multiplies the playback adds any.
+    """
+    if stored is not None:
+        return _stored_kinks(v, stored)
     times = [sb.env.t for s in v.audible for sb in s.subbands]
     times += [s.shape.t for s in v.audible if s.chatter]
     times += [s.grains.knots()[0] for s in v.audible if s.grains is not None]
@@ -573,6 +602,18 @@ def kink_terms(v: Voice, ip: carrier.Interpolator, tabs: Tables) -> Kinks:
         np.array([row[2] for row in rows], dtype=float),
         np.array([row[3] for row in rows], dtype=float),
     )
+
+
+def _stored_kinks(v: Voice, stored: Stored) -> Kinks:
+    """Return the damper's jumps on a stored sound's playback, the only kinks it has."""
+    if v.damper is None:
+        return _no_kinks()
+    knots = v.damper.t[v.damper.t <= v.t_src + END_ROUNDING_S]
+    played, slope = stored.at(knots)
+    d, dd = v.damper(knots), v.damper.derivative(knots)
+    j2, j3 = (j[: knots.size] for j in v.damper.jumps())
+    paths = tuple(f"damper.amp[{k}]" for k in range(1, knots.size + 1))
+    return Kinks(paths, knots, played * d, slope * d + played * dd, j2 * played, j3 * played + 3 * j2 * slope)
 
 
 def _rows(where: dict[float, int], paths: list[str], knots: Floats, j2: Floats, j3: Floats) -> list[Row]:

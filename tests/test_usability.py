@@ -470,3 +470,71 @@ def test_take_the_swell_out_of_the_wash_and_brighten_it() -> None:
     assert band_energy(still, 8000, 14000, 0, 4) / band_energy(still, 8000, 14000, 40, 120) > 1.5 * early / late
     brighter = edit(p, **{"noise[1].band_hz": [400.0, 18000.0]})  # one field
     assert centroid(audio(brighter), 0, 500) > 1.05 * centroid(x, 0, 500)
+
+
+# From the references voiced for the vision: house, tech house, trance, and the machine and the band.
+
+
+def test_close_the_house_open_hat_and_darken_the_ride() -> None:
+    """Close the house open hat on the next 16th with one command, and darken the house ride with one field."""
+    hat, ride = ref("house-open"), ref("house-ride")
+    assert decay_ms(audio(patch.choke(hat, 109.0, release=20.0))) < 0.5 * decay_ms(audio(hat))  # one command
+    darker = edit(ride, **{"noise[1].band_hz": [600.0, 9000.0]})  # one field
+    assert centroid(audio(darker), 0, 500) < 0.9 * centroid(audio(ride), 0, 500)
+
+
+def test_shake_the_house_tambourine_longer_and_the_shaker_slower() -> None:
+    """Lengthen the house tambourine's shiver and the 16th shaker's stroke, one command each."""
+    for name, curve in (("house-tamb", "noise[2].amp"), ("shaker-16", "all")):
+        p = ref(name)
+        assert decay_ms(audio(patch.stretch(p, curve, 2.0))) > 1.25 * decay_ms(audio(p)), name
+
+
+def test_drop_the_tops_rattle() -> None:
+    """Silence the top's rattling plates with one field: as grainy as a plain closed hat."""
+    p = ref("top")
+    plain = edit(p, **{"noise[2].level_db": -math.inf})  # one field
+    assert granularity(plain, 5, 150) < 0.6 * granularity(p, 5, 150)
+
+
+def test_shorten_the_trance_crash_and_darken_the_trance_ride() -> None:
+    """Shorten the trance crash with one command, and darken the trance ride with one field."""
+    crash, ride = ref("trance-crash"), ref("trance-ride")
+    assert decay_ms(audio(patch.stretch(crash, "all", 0.5))) < 0.8 * decay_ms(audio(crash))  # one command
+    darker = edit(ride, **{"noise[1].band_hz": [900.0, 9000.0]})  # one field
+    assert centroid(audio(darker), 0, 500) < 0.9 * centroid(audio(ride), 0, 500)
+
+
+def test_retune_the_analog_open_hat_and_shorten_its_cymbal() -> None:
+    """Retune the analog open hat with one command, and shorten the analog cymbal with another."""
+    hat, cymbal = ref("analog-open"), ref("analog-cymbal")
+    assert log_shift_semitones(audio(hat), audio(patch.pitch(hat, "-3"))) == pytest.approx(-3.0, abs=0.2)
+    assert decay_ms(audio(patch.stretch(cymbal, "all", 0.5))) < 0.8 * decay_ms(audio(cymbal))
+
+
+def test_crush_the_machine_hat_and_open_it_longer() -> None:
+    """Store the machine's closed hat in fewer bits with one field, grainier; open its open hat with the damper."""
+    closed = ref("machine-closed")
+    crushed = edit(closed, **{"storage.bits": 4})  # one field
+    assert granularity(crushed, 10, 60) > 1.1 * granularity(closed, 10, 60)
+    hat = ref("machine-open")
+    longer = patch.stretch(hat, "damper.amp", 1.6, after_ms=0.0)  # one command: the decay knob
+    assert decay_ms(audio(longer)) > 1.25 * decay_ms(audio(hat))
+
+
+def test_close_the_half_open_hat_and_still_the_sizzle() -> None:
+    """Stop the half-open hat's plates slapping with one field, and the sizzle ride's rivets with another."""
+    half = ref("half-open")
+    still = edit(half, **{"noise[1].chatter": 0.0})  # one field
+    assert granularity(still, 10, 300) < granularity(half, 10, 300)
+    sizzle = ref("sizzle")
+    quiet = edit(sizzle, **{"noise[2].level_db": -math.inf})  # one field: the rivets
+    assert granularity(quiet, 100, 1500) < 0.8 * granularity(sizzle, 100, 1500)
+
+
+def test_darken_the_china_and_shorten_the_splash() -> None:
+    """Darken the china with one field, and shorten the splash with one command."""
+    china, splash = ref("china"), ref("splash")
+    darker = edit(china, **{"noise[1].band_hz": [700.0, 8000.0]})  # one field
+    assert centroid(audio(darker), 0, 500) < 0.9 * centroid(audio(china), 0, 500)
+    assert decay_ms(audio(patch.stretch(splash, "all", 0.5))) < 0.8 * decay_ms(audio(splash))
