@@ -224,7 +224,7 @@ def test_the_cache_drops_the_oldest_but_never_what_a_render_needs(monkeypatch: p
     carrier.clear_cache()
 
 
-def test_a_render_never_waits_on_anothers_tables() -> None:
+def test_a_render_never_waits_on_the_tables_of_another() -> None:
     """Serve a cached table while another render is still making its own, and make again what was evicted meanwhile."""
     carrier.clear_cache()
     rate = carrier.table_rate(48000)
