@@ -452,6 +452,50 @@ have been checked in sfizz and liquidsfz (VALIDATION.md).
   hat, is F#2. DAWs that call middle C C3, such as Ableton Live, Cubase and
   Logic Pro, call it F#1.
 
+### With Ballast and Halyard
+
+The references sit at −32.5 LUFS so they compare fairly with each other,
+which leaves them some 24 dB under Ballast's kicks, which peak at −1 dBTP.
+For a working balance, set the kick's `output.db` to −10 and raise each
+reference's `output.db` by the amount below: in a groove at the genre's tempo,
+a hat, shaker, tambourine or ride on the offbeats then reads 10 dB under the
+kick by loudness, a crash, splash or china struck once in two bars 6 dB
+under, Halyard's snares and claps, raised as its guide says, 5 dB under, and
+no file peaks above −1 dBFS. Each was measured against the Ballast preset of
+its genre; it is a starting balance, and your ears and the track decide the
+rest.
+
+| Reference | Against Ballast's | Played | Raise `output.db` by | Note |
+|---|---|---|---|---|
+| `closed` | `house` | offbeats, 10 dB under | +5.6 dB | |
+| `open` | `house` | offbeats, 10 dB under | +5.4 dB | |
+| `pedal` | `house` | offbeats, 10 dB under | +4.9 dB | |
+| `crash` | `house` | once per two bars, 6 dB under | +9.3 dB | |
+| `ride` | `house` | offbeats, 10 dB under | +5.2 dB | |
+| `bell` | `house` | offbeats, 10 dB under | +3.6 dB | |
+| `analog` | `house` | offbeats, 10 dB under | +5.3 dB | 0.7 dB short, held at −1 dBFS by its peak |
+| `shaker` | `house` | offbeats, 10 dB under | +5.3 dB | |
+| `tambourine` | `house` | offbeats, 10 dB under | +5.2 dB | |
+| `offbeat` | `trance` | offbeats, 10 dB under | +4.0 dB | |
+| `tight` | `tech-house` | offbeats, 10 dB under | +4.8 dB | |
+| `dead` | `house` | offbeats, 10 dB under | +5.7 dB | |
+| `wash` | `house` | offbeats, 10 dB under | +5.0 dB | |
+| `house-open` | `house` | offbeats, 10 dB under | +5.4 dB | |
+| `house-ride` | `house` | offbeats, 10 dB under | +5.2 dB | |
+| `house-tamb` | `house` | offbeats, 10 dB under | +4.9 dB | |
+| `shaker-16` | `tech-house` | offbeats, 10 dB under | +4.7 dB | |
+| `top` | `tech-house` | offbeats, 10 dB under | +4.4 dB | |
+| `trance-crash` | `trance` | once per two bars, 6 dB under | +7.9 dB | |
+| `trance-ride` | `trance` | offbeats, 10 dB under | +3.8 dB | |
+| `analog-open` | `house` | offbeats, 10 dB under | +5.4 dB | |
+| `analog-cymbal` | `house` | once per two bars, 6 dB under | +9.3 dB | |
+| `machine-closed` | `house` | offbeats, 10 dB under | +5.4 dB | |
+| `machine-open` | `house` | offbeats, 10 dB under | +5.3 dB | |
+| `half-open` | `house` | offbeats, 10 dB under | +5.4 dB | |
+| `sizzle` | `house` | offbeats, 10 dB under | +5.3 dB | |
+| `china` | `house` | once per two bars, 6 dB under | +8.5 dB | 0.8 dB short, held at −1 dBFS by its peak |
+| `splash` | `house` | once per two bars, 6 dB under | +9.1 dB | |
+
 ## Python API
 
 The modules are importable for scripting renders and kits:
