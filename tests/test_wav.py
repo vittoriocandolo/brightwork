@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 from scipy.io import wavfile
 
 from brightwork_synth import __version__, render, spectrum, wav
-from brightwork_synth.patch import Patch, dumps, loads
+from brightwork_synth.patch import SAMPLE_RATES, Patch, dumps, loads
 
 from .conftest import EXAMPLE, make, make_tone, meta_of
 
@@ -277,7 +277,7 @@ def test_refuses_what_is_not_a_readable_wave(tmp_path: Path) -> None:
 
 def test_every_rate_writes_a_valid_file(tmp_path: Path) -> None:
     """Write a valid file at every export rate."""
-    for rate in (44100, 48000, 88200, 96000):
+    for rate in SAMPLE_RATES:
         path = tmp_path / f"{rate}.wav"
         audio, _ = export(path, make(**{"output.sample_rate": rate}))
         data, sr = soundfile.read(path, dtype="float32")

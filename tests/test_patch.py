@@ -410,7 +410,7 @@ def test_damping_and_bloom_limits() -> None:
         ("noise[2].chatter_hz", [10, 4000], [9.9, 4000.1]),
         ("drive.db", [0, 48], [-0.1, 48.1]),
         ("output.db", [-60, 24], [-60.5, 24.5]),
-        ("output.sample_rate", [44100, 48000, 88200, 96000], [22050, 192000]),
+        ("output.sample_rate", [44100, 48000, 88200, 96000, 176400, 192000], [22050, 384000]),
         ("output.format", ["float32", "pcm24", "pcm16"], ["pcm32", "float64", 24]),
         ("output.mode", ["gain", "peak", "true-peak"], ["loudness"]),
         ("output.polarity", [1, -1], [0, 2]),

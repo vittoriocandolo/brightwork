@@ -18,9 +18,9 @@ from .conftest import EXAMPLE, make
 # ITU-R BS.1770-4, table 1 and table 2: the K-weighting biquads at 48 kHz.
 SHELF_48K = [1.53512485958697, -2.69169618940638, 1.19839281085285, 1.0, -1.69065929318241, 0.73248077421585]
 HIGHPASS_48K = [1.0, -2.0, 1.0, 1.0, -1.99004745483398, 0.99007225036621]
-RATES = (44100, 48000, 88200, 96000)
+RATES = (44100, 48000, 88200, 96000, 176400, 192000)
 COEFFICIENTS = 1e-14  # how close the 48 kHz design comes to the published table
-RESPONSE_DB = 0.03  # how close every other rate's response comes to the 48 kHz one
+RESPONSE_DB = 0.01  # how close every other rate's response comes to the 48 kHz one
 RATES_LU = 0.05  # how close one sound reads at every export rate
 
 
@@ -31,9 +31,9 @@ def test_k_weighting_reproduces_the_published_coefficients() -> None:
     assert np.max(np.abs(sos[1] - HIGHPASS_48K)) < COEFFICIENTS
 
 
-@pytest.mark.parametrize("rate", [44100, 88200, 96000])
+@pytest.mark.parametrize("rate", [44100, 88200, 96000, 176400, 192000])
 def test_k_weighting_is_the_same_filter_at_every_rate(rate: int) -> None:
-    """Design the K-weighting at another rate, and find the 48 kHz response within 0.03 dB from 20 Hz to 20 kHz."""
+    """Design the K-weighting at another rate, and find the 48 kHz response within 0.01 dB from 20 Hz to 20 kHz."""
     f = np.geomspace(20, 20000, 400)
     ref = np.abs(sosfreqz(k_weighting(48000), worN=f, fs=48000)[1])
     got = np.abs(sosfreqz(k_weighting(rate), worN=f, fs=rate)[1])

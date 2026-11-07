@@ -37,7 +37,7 @@ this machine.
 | Drive headroom | The report's value against full renders on every fixture; dense scans | Never optimistic beyond its 0.00001 dB resolution on the 1,206 fixtures whose status changes within 0–48 dB, and exact to 0.001 dB on 944; at most 0.419 dB conservative within 3 dB of the edge; right on all 163 that never change; no change of status between candidates in 377 dense scans. |
 | Rattles | Collisions per take, thinned by the shape, at unit mean square at the peak; exact and fast evaluation | Over 200 takes the collisions in each stretch of a shake are its rate times the shape's area there, within 4σ; R's mean square is 1 within 0.1 where the shape is 1, and the thinned stream's where it is ½; a dense shake's energy varies by 0.2 dB (standard deviation) between takes, against 0.8 dB for a Poisson stream; the run-summed evaluation equals the collisions summed one by one within 10⁻¹³, however the samples are split; every collision's jumps in x″ and x‴ match the model's one-sided derivatives. |
 | Storage | Values every D-th internal sample, rounded to their bits against the peak; the playback the closed form, smooth and causal; renders validated driven and choked | Every stored value lies on its grid of 2^(bits−1) − 1 steps, the peak exactly on it; the filter is 3 dB down at its frequency to 10⁻¹⁴; a constant plays back as itself to 10⁻¹², nothing before its first value and nothing 2L after its last; the playback is the same at F and 4F, however it is split, and as summed value by value, to 10⁻¹²; stored closed and open hats under 12–18 dB of drive, the open one choked, are inside and agree with the reference below −200 dB, their only kinks the damper's. |
-| Loudness | EBU Tech 3341, mono and stereo, every rate; K-weighting | The 48 kHz coefficients match BS.1770's to 10⁻¹⁴, the other rates match its response within 0.03 dB. The −23 dBFS 1 kHz sine in both channels reads −22.99 to −23.01 LUFS at all four rates; one channel alone reads 3.01 dB lower, and a second, different channel adds its energy. |
+| Loudness | EBU Tech 3341, mono and stereo, every rate; K-weighting | The 48 kHz coefficients match BS.1770's to 10⁻¹⁴, and the other rates match its response within 0.008 dB: the high-pass's numerator is scaled to the 48 kHz passband gain, which the standard's 1, −2, 1 would otherwise let drift by up to 0.032 dB at 192 kHz. The −23 dBFS 1 kHz sine in both channels reads −22.99 LUFS at all six rates; one channel alone reads 3.01 dB lower, and a second, different channel adds its energy. |
 | Export | Independent readers, mono and stereo; each file carries its patch and gains | soundfile, `scipy.io.wavfile`, Python's `wave` and an independent chunk walker read identical samples and headers, float and PCM, mono and stereo. A stereo file's channels equal its takes' mono renders; each channel of a PCM pair is dithered with its own take. Each file's `cymb` chunk holds the first take's patch and the file's gains, and its samples follow from them. |
 | Kits | The SFZ mapping, parsed back and played | Every key, velocity 1–127 and take maps to exactly one existing file; the level, measured from the files, follows 40·log₁₀(v/127) within 0.01 dB, never stepping more than one velocity step across a boundary; chokes as declared; a kit re-renders byte-identically. Two players load it (below). |
 | Takes | Seeds 1–4 × takes 1–8 of each reference: one gain per set; spread ≤ 1 dB, with level matching where flagged | One gain per set. Spreads 0.07–0.66 dB for the open hat, crash, ride and bell; 1.4, 1.9 and 1.5 dB for the closed, pedal and analog hats, whose sets the report flags and level matching brings within 0.0001 dB (below). |
@@ -64,8 +64,9 @@ Decimation is one matrix product per block (plan §3). For every shipped
 design at its base and double rate it agrees with `upfirdn` within 9·10⁻¹⁷ of
 Σ|h|·max|y| on Gaussian inputs of 1 to 600,000 samples; it gives identical
 outputs for any split of the work and any render length; and changing one
-input changes exactly the outputs whose window holds it. The 96 and 88.2 kHz
-exports equal the 48 and 44.1 kHz ones with samples filled in, bit for bit.
+input changes exactly the outputs whose window holds it. The 88.2, 96, 176.4
+and 192 kHz exports equal the 44.1 and 48 kHz ones with samples filled in,
+bit for bit.
 
 ### Interpolators
 
@@ -90,11 +91,11 @@ internal signal to 10⁻¹⁴. It decimates with `upfirdn`, apart from the
 shipping path's matrix products; the two agree within 9·10⁻¹⁷ of full scale,
 far below every error measured here.
 
-- 1,233 of the 1,369 grid references at 32× converged, with a median
+- 1,241 of the 1,381 grid references at 32× converged, with a median
   agreement of −205 dB.
-- The 512 × base check (24.6 MHz) on 136 fixtures agreed at least as well as
+- The 512 × base check (24.6 MHz) on 138 fixtures agreed at least as well as
   the 128/256 pair in every case.
-- The 136 unconverged references all have at least 10.6 dB of drive and are
+- The 140 unconverged references all have at least 10.6 dB of drive and are
   extreme corners: noise under 36–48 dB of drive or at +24 dB under 24 dB,
   four layers at +24 dB and the louder crossfades, every export rate under
   36 dB, one 50 µs tick at +12 dB under 24 dB, 26 rattles under 12–24 dB and
@@ -104,7 +105,7 @@ far below every error measured here.
 
 ## The adversarial grid (§8.3)
 
-`tools/grid.py` builds 1,369 fixtures from combined corners, not one knob at a
+`tools/grid.py` builds 1,381 fixtures from combined corners, not one knob at a
 time, and runs each at 32× (`docs/grid/k32.csv`). The 16× run
 (`docs/grid/k16.csv`) is the record of the 949 fixtures before rattles, which
 chose K.
@@ -122,23 +123,24 @@ chose K.
 | rattles | 198 | collision rates 20–4,000 a second × rings of 1–200 ms over a shaker's shell, a tambourine's jingles and the whole band × level and drive, where at most 64 collisions ring at once; a tambourine of jingles and a head sharing their collisions, under chatter, × drive 0–24 dB |
 | storage | 76 | 4, 6, 8 and 12 bits × storage rates of 12, 32 and 64 kHz × playback filters at 4, 12 and 20 kHz over the hat's plates, × drive 0 and 24 dB; a long ring choked, and the analog squares, stored at 6 bits and 32 kHz, × drive 0 and 24 dB |
 | seeds | 90 | six representative fixtures across seeds 1–4 × takes 1–4 |
-| rates | 18 | 44.1, 88.2 and 96 kHz exports × drive 0–36 dB, plain and +6 dB |
+| rates | 30 | 44.1, 88.2, 96, 176.4 and 192 kHz exports × drive 0–36 dB, plain and +6 dB |
 | random | 220 | the whole valid domain; three sources in ten rattle, and one fixture in five is stored |
 | longest | 6 | 8 s rides and crashes of three sources at 96 kHz × drive 0–24 dB |
 
 ### Results
 
 Each column applies its own refit constant: 0.85 at 16× and 0.76 at 32×. The
-16× column is the 949 fixtures before rattles; the 32× column, all 1,369.
+16× column is the 949 fixtures before rattles; the 32× column, all 1,381,
+the 176.4 and 192 kHz exports included.
 
 | | 16× | 32× |
 |---|---|---|
-| Pass (E ≤ −100 dB) | 529 | 982 |
-| Converged references | 840 | 1,233 |
-| Inside the validated domain | 410 | 887 |
+| Pass (E ≤ −100 dB) | 529 | 986 |
+| Converged references | 840 | 1,241 |
+| Inside the validated domain | 410 | 891 |
 | Inside and failing or unconverged | **0** | **0** |
 | Worst error inside | −110.4 dB | −113.8 dB |
-| Undriven fixtures passing | 358 of 368 | 629 of 630 |
+| Undriven fixtures passing | 358 of 368 | 633 of 634 |
 | Kink bound exceeded | never | never |
 | Saturation constant for 6 dB of margin | 0.849 | 0.756 |
 | Outside but passing (the rule's caution) | 119 | 95 |
@@ -201,19 +203,19 @@ is a full render from it: saturator, decimator, output peak, the knee slew
 measured directly and the kink bound. The search starts at the fixture's own
 drive and stops at the first change of status, whose bracket is bisected with
 full renders to 0.00001 dB. On fixtures whose edge is within 6 dB, it also
-scans every 0.05 dB up to the edge. In all, 1,369 fixtures and 100,210 full
+scans every 0.05 dB up to the edge. In all, 1,381 fixtures and 100,945 full
 renders:
 
-- **Never optimistic.** On the 1,206 fixtures whose status changes within
+- **Never optimistic.** On the 1,218 fixtures whose status changes within
   0–48 dB, the report is at most 0.00001 dB beyond the brute force, its
-  resolution. It is exact to 0.001 dB on 944, conservative by 0.001–0.1 dB on
-  199, by 0.1–1 dB on 44 and by 1–3.4 dB on 19.
+  resolution. It is exact to 0.001 dB on 954, conservative by 0.001–0.1 dB on
+  201, by 0.1–1 dB on 44 and by 1–3.4 dB on 19.
 - **Exact where it matters.** Within 3 dB of the edge (197 fixtures) it is at
   most 0.419 dB conservative.
 - **No change of status left.** Where full renders never change status within
   0–48 dB (163 fixtures), the report says so on 161 and reports nothing for
   the 2 that are silent.
-- **No islands missed.** The 377 dense scans found no change of status
+- **No islands missed.** The 379 dense scans found no change of status
   between the candidates.
 
 The largest gaps are on the densest rattle and on square banks, fixtures

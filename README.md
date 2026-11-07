@@ -106,7 +106,7 @@ choked by the closed one, and `hats/hats.sfz` to play it.
 | Parameter | Value |
 |---|---|
 | Output | mono WAV, or stereo from two takes: float32, or 24- or 16-bit PCM with seeded TPDF dither |
-| Sample rates | 44.1, 48, 88.2 and 96 kHz; the 2× rates are the base rate's files with samples filled in |
+| Sample rates | 44.1, 48, 88.2, 96, 176.4 and 192 kHz; the 2× and 4× rates are the base rate's files with samples filled in |
 | Internal rate | 32 × the base rate: 1411.2 or 1536 kHz |
 | Decimators | frozen minimum-phase, flat to 0.00004 dB up to 20 kHz and at least 115.1 dB down from half the base rate |
 | Aliasing | every render reports whether it lies inside the validated domain, where the error against the reference is below −100 dB; the references take 11–47 dB of drive and stay inside |

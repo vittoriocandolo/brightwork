@@ -54,7 +54,8 @@ The first public release.
 - Editing commands that print a complete patch: `pitch` by semitones or to a
   note, `stretch` of chosen curves, `choke` with a 60 dB release, and
   `softer`, the same cymbal struck softer.
-- Exports at 44.1, 48, 88.2 and 96 kHz, as float32 or as 24- or 16-bit PCM
+- Exports at 44.1, 48, 88.2, 96, 176.4 and 192 kHz, as float32 or as 24- or
+  16-bit PCM
   with seeded TPDF dither, at a gain, a sample peak or a true peak, measured
   exactly between the samples, with the root key in a
   `smpl` chunk and the patch and its provenance in a `cymb` chunk, which

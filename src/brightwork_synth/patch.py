@@ -41,7 +41,7 @@ type Row = tuple[str, str, str]  # a canonical line's key, value and comment
 
 INSTRUMENT = "cymbal"
 SCHEMA = 1
-SAMPLE_RATES = (44100, 48000, 88200, 96000)
+SAMPLE_RATES = (44100, 48000, 88200, 96000, 176400, 192000)
 FORMATS = ("float32", "pcm24", "pcm16")
 WAVES = ("sine", "square")
 PHASES = ("strike", "free")

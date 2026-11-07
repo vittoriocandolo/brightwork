@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from brightwork_synth import carrier, cli, render, spectrum, voice
 from brightwork_synth.loudness import momentary_max
-from brightwork_synth.patch import loads
+from brightwork_synth.patch import SAMPLE_RATES, loads
 
 from .conftest import EXAMPLE, make, make_tone
 
@@ -53,7 +53,7 @@ HOT = {"noise[1].level_db": 6.0, "drive.db": 24.0}
 
 def test_output_length_follows_the_timing_contract() -> None:
     """Render at every rate as long as the timing contract says, from exactly zero."""
-    for rate in (44100, 48000, 88200, 96000):
+    for rate in SAMPLE_RATES:
         p = make_tone(**{"output.sample_rate": rate})
         s = render.synthesize(p)
         internal, factor = render.rates(rate)

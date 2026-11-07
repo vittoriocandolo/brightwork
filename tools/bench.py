@@ -45,7 +45,7 @@ CASES = (
     ("crash 5 s, 3 sources", "crash", 5000.0, True, 1.5),
     ("ride 8 s, 3 sources", "ride", 8000.0, False, 2.0),
 )
-RATES = (44100, 48000, 88200, 96000)
+RATES = (44100, 48000, 88200, 96000, 176400, 192000)
 REPEAT = 3  # takes timed per case, the fastest counted
 KIT_S, MEMORY_MIB = 30.0, 500
 WASH = Noise(  # a third source: a dark wash under the crash

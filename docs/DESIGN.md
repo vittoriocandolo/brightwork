@@ -230,8 +230,9 @@ filters and decimates, free of pre-ringing:
 | 48 kHz | 2,891 | 1.88 ms | 1.8·10⁻⁵ dB | 115.1 dB |
 
 Both ship as data checked by SHA-256. The 88.2 and 96 kHz files reuse their
-family's internal rate with half the factor, so a 96 kHz file is exactly the
-48 kHz file with the samples between filled in.
+family's internal rate with half the factor, and 176.4 and 192 kHz with a
+quarter, so a 96 or 192 kHz file is exactly the 48 kHz file with the samples
+between filled in.
 
 Synthesis runs in blocks of 2¹⁸ samples aligned to the start, and the
 interpolation and the decimation are matrix products in fixed blocks, each on
