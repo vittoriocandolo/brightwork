@@ -34,7 +34,7 @@ import numpy as np
 
 from brightwork_synth import carrier, cli, patch
 from brightwork_synth.reference import CHECK, DEEP, REFERENCE, compare, reference
-from brightwork_synth.render import LIMIT, QUIET, SATURATION, synthesize
+from brightwork_synth.render import FAMILY, LIMIT, QUIET, SATURATION, synthesize
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -60,6 +60,7 @@ TOP_HZ = 20000.0
 DAMPED = 0.2  # the share of random fixtures that a damper chokes
 RATTLING = 0.3  # the share of random sources that rattle
 STORING = 0.2  # the share of random fixtures that are stored
+FOURFOLD = 0.2  # the share of random fixtures exported at 4× their family's base rate
 
 
 def say(text: str) -> None:
@@ -456,6 +457,7 @@ def _random(out: list[Fixture]) -> None:
     rng = np.random.default_rng(2026)
     rattles = np.random.default_rng(2027)  # its own stream, so the fixtures drawn before rattles keep their draws
     stores = np.random.default_rng(2028)  # and storage too
+    fours = np.random.default_rng(2029)  # and the 4× rates, drawn after validity so every earlier fixture stays
     made = 0
     while made < RANDOM_FIXTURES:
         e = random_edits(rng)
@@ -469,6 +471,9 @@ def _random(out: list[Fixture]) -> None:
                 source["grain_ms"] = ring
                 source["grains_hz"] = min(float(10 ** rattles.uniform(1, 3.3)), 1000 * patch.MAX_OVERLAP / ring)
         if valid(e):
+            if fours.uniform() < FOURFOLD:
+                four = {**e, "output.sample_rate": 4 * FAMILY[int(e["output.sample_rate"])]}
+                e = four if valid(four) else e
             out.append(("random", f"r{made:03d}", e))
             made += 1
 

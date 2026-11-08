@@ -11,7 +11,7 @@ person; its state is recorded at the end.
 
 **Rattles.** When rattles joined the model (plan §2.12), the 32× grid, the drive-headroom brute force and the references by measurement were run again, on a Qualcomm Oryon, 12 cores, under WSL 2 (Linux 6.18), with Python 3.15.0, NumPy 2.5.4 and SciPy 1.18.1. Those sections give the new figures; the 16× grid and every other section are from the machine above.
 
-**Storage.** When storage joined the model (plan §2.13), with fifteen more references, the 32× grid, the drive-headroom brute force, the references by measurement and their neighbourhoods were run again on the Oryon, and the rule's constant refit; those sections give the figures.
+**Storage.** When storage joined the model (plan §2.13), with fifteen more references, the 32× grid, the drive-headroom brute force, the references by measurement and their neighbourhoods were run again on the Oryon, and the rule's constant refit; those sections give the figures. They were run once more after the review that stored at the nearest rate and added 4× exports to the random draws, with the same results.
 
 ## Numerical criteria (§8.1)
 
@@ -124,7 +124,7 @@ chose K.
 | storage | 76 | 4, 6, 8 and 12 bits × storage rates of 12, 32 and 64 kHz × playback filters at 4, 12 and 20 kHz over the hat's plates, × drive 0 and 24 dB; a long ring choked, and the analog squares, stored at 6 bits and 32 kHz, × drive 0 and 24 dB |
 | seeds | 90 | six representative fixtures across seeds 1–4 × takes 1–4 |
 | rates | 30 | 44.1, 88.2, 96, 176.4 and 192 kHz exports × drive 0–36 dB, plain and +6 dB |
-| random | 220 | the whole valid domain; three sources in ten rattle, and one fixture in five is stored |
+| random | 220 | the whole valid domain; three sources in ten rattle, one fixture in five is stored, and 32 are exported at 176.4 or 192 kHz |
 | longest | 6 | 8 s rides and crashes of three sources at 96 kHz × drive 0–24 dB |
 
 ### Results
@@ -172,13 +172,13 @@ Per family at 32×:
 | storage | 76 | 55 | 63 | 0 | −136.8 dB |
 | rattles | 198 | 101 | 115 | 26 | −126.2 dB |
 | seeds | 90 | 56 | 70 | 0 | −117.7 dB |
-| rates | 18 | 6 | 6 | 6 | −152.5 dB |
+| rates | 30 | 10 | 10 | 10 | −152.5 dB |
 | random | 220 | 164 | 167 | 32 | −115.8 dB |
 | longest | 6 | 5 | 5 | 0 | −134.2 dB |
 
 The worst error inside is a struck sine with a 10 µs rise, undriven. The
-32× grid took 2.7 CPU-hours, a median of 0.8 s per fixture and at most 256 s,
-for the wash 6 dB softer.
+32× grid took 1.1 CPU-hours, a median of 0.5 s per fixture and at most 71 s,
+for an 8 s damping fixture blooming from 6 kHz.
 
 ### The kink bound
 
@@ -203,13 +203,13 @@ is a full render from it: saturator, decimator, output peak, the knee slew
 measured directly and the kink bound. The search starts at the fixture's own
 drive and stops at the first change of status, whose bracket is bisected with
 full renders to 0.00001 dB. On fixtures whose edge is within 6 dB, it also
-scans every 0.05 dB up to the edge. In all, 1,381 fixtures and 100,945 full
+scans every 0.05 dB up to the edge. In all, 1,381 fixtures and 100,944 full
 renders:
 
 - **Never optimistic.** On the 1,218 fixtures whose status changes within
   0–48 dB, the report is at most 0.00001 dB beyond the brute force, its
-  resolution. It is exact to 0.001 dB on 954, conservative by 0.001–0.1 dB on
-  201, by 0.1–1 dB on 44 and by 1–3.4 dB on 19.
+  resolution. It is exact to 0.001 dB on 953, conservative by 0.001–0.1 dB on
+  202, by 0.1–1 dB on 44 and by 1–3.4 dB on 19.
 - **Exact where it matters.** Within 3 dB of the edge (197 fixtures) it is at
   most 0.419 dB conservative.
 - **No change of status left.** Where full renders never change status within
