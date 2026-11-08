@@ -6,7 +6,11 @@
 import dataclasses
 import itertools
 import math
+import multiprocessing
 import re
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing.context import BaseContext
 from pathlib import Path
 
 import numpy as np
@@ -424,3 +428,29 @@ def test_the_command_refuses_what_it_cannot_read_or_fit(tmp_path: Path, capsys: 
     assert "velocities" in captured.out
     assert "not written: the loudest file peaks at" in captured.err
     assert not out.exists()
+
+
+def test_workers_start_fresh_never_forked_from_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Render a kit's takes on two workers, started by a fork server or fresh, never by forking this process.
+
+    A worker forked from here would inherit any lock a thread of this process holds, such as an audition watcher
+    rendering, without the thread that would release it, and wait on it forever.
+    """
+    started: list[tuple[int, str]] = []
+
+    def watched(
+        workers: int,
+        *,
+        mp_context: BaseContext,
+        initializer: Callable[[int], None],
+        initargs: tuple[int],
+    ) -> ProcessPoolExecutor:
+        started.append((workers, mp_context.get_start_method()))
+        return ProcessPoolExecutor(workers, mp_context=mp_context, initializer=initializer, initargs=initargs)
+
+    monkeypatch.setattr(pack, "ProcessPoolExecutor", watched)
+    layers = ladder("closed", (0, 12))
+    kit = pack.build([(42, layers)], pack.Options(1), workers=len(layers))
+    fresh = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
+    assert started == [(len(layers), fresh)]
+    assert len(kit.keys[0].layers) == len(layers)
