@@ -33,7 +33,7 @@ import scipy
 from brightwork_synth import cli
 from brightwork_synth.pack import Options, build
 from brightwork_synth.patch import Noise, loads, softer, stretch
-from brightwork_synth.render import decimator, render
+from brightwork_synth.render import FAMILY, decimator, render
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,7 +79,7 @@ def _hit(name: str, rate: int, ms: float, *, third: bool) -> Hit:
     if third:
         p = dataclasses.replace(p, noise=(*p.noise, WASH))
     p = stretch(p, "all", ms / p.length_ms, after_ms=0.0)
-    decimator(44100 if rate in {44100, 88200} else 48000)  # loading the shipped coefficients is not part of a render
+    decimator(FAMILY[rate])  # loading the shipped coefficients is not part of a render
     _, report = render(dataclasses.replace(p, take=999))  # first-use costs of the libraries, not of this render
     base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     fresh, cached = float("inf"), float("inf")

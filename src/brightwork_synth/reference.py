@@ -43,7 +43,8 @@ from scipy.signal import upfirdn
 
 from . import carrier
 from .render import FAMILY, Domain, K, db, decimator, domain, interpolator_for, rates, synthesize, take_numbers
-from .voice import Model, gate, sample_count, saturate, stored_sound, tables, voice
+from .storage import Stored, divider
+from .voice import Model, gate, sample_count, saturate, stored_sound, synthesize_x, tables, voice
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -154,8 +155,8 @@ def reference(
     tabs = tables(v, ip.rate)
     n = sample_count(v.t_src, rate)
     # Storage keeps what the shipping render stored: its rounding to a few bits is the model, not an error.
-    shipping = interpolator_for(p.output.sample_rate, k)
-    stored = stored_sound(v, rate, n, shipping, tables(v, shipping.rate)) if v.storage is not None else None
+    # What it stored from is checked apart, in `stored_error`.
+    stored = shipping_stored(p, k)
     z = band_limited(
         Model(v, ip, tabs, stored),
         rate,
@@ -166,6 +167,40 @@ def reference(
     first = GUARD // factor  # GUARD is a multiple of every factor, so the output grid stays aligned
     out = upfirdn(taps, z, down=factor)[first : first + (n + taps.size - 2) // factor + 1]
     return Reference(out, z)
+
+
+@functools.lru_cache(maxsize=2)
+def shipping_stored(p: Patch, k: int = K) -> Stored | None:
+    """Return what the shipping render of p stores, or None without storage: made once for both references."""
+    v = voice(p)
+    if v.storage is None:
+        return None
+    rate, _ = rates(p.output.sample_rate, k)
+    shipping = interpolator_for(p.output.sample_rate, k)
+    return stored_sound(v, rate, sample_count(v.t_src, rate), shipping, tables(v, shipping.rate))
+
+
+def stored_error(p: Patch, k: int = K, workers: int | None = None) -> Errors | None:
+    """Return how far a stored patch's sources, before quantization, are from the reference's at the storage instants.
+
+    The reference renders the stored values as the shipping render made them,
+    since rounding them to a few bits is the model: so the synthesis they are
+    taken from is checked here, at each storage instant, from the exact tables
+    at the reference rate, where every storage instant lies on its grid.
+    """
+    v = voice(p)
+    if v.storage is None:
+        return None
+    rate, _ = rates(p.output.sample_rate, k)
+    base = FAMILY[p.output.sample_rate]
+    n = sample_count(v.t_src, rate)
+    d = divider(rate, v.storage.rate_hz)
+    shipping = interpolator_for(p.output.sample_rate, k)
+    ship = synthesize_x(Model(v, shipping, tables(v, shipping.rate)), rate, n, workers, damped=False)[::d]
+    ip = carrier.interpolator(base, REFERENCE // 2)
+    up = REFERENCE // k
+    exact = synthesize_x(Model(v, ip, tables(v, ip.rate)), rate * up, n * up, workers, damped=False)[:: d * up]
+    return compare(ship, exact[: ship.size])
 
 
 @dataclass(frozen=True)
@@ -223,6 +258,7 @@ class Verification:
     check_hz: int
     leakage_db: float
     domain: Domain
+    storage: Errors | None = None  # what a stored patch stored from, shipping against reference, before quantization
 
     @property
     def converged(self) -> bool:
@@ -231,8 +267,8 @@ class Verification:
 
     @property
     def passed(self) -> bool:
-        """Whether the reference counts and the render is within the limits of it."""
-        return self.converged and self.error.passes()
+        """Whether the reference counts, the render is within the limits of it, and so is what it stored from."""
+        return self.converged and self.error.passes() and (self.storage is None or self.storage.passes())
 
     def lines(self) -> list[str]:
         """Return the report's lines."""
@@ -252,6 +288,11 @@ class Verification:
             f"reference   {self.reference_hz / 1e6:g} and {self.check_hz / 1e6:g} MHz {conv}",
             f"leakage     ≤ {self.leakage_db:.0f} dB of the output (the same in both, not counted)",
             f"domain      {predicted}: {inside}",
+            *(
+                [f"stored      before quantization: E_max {self.storage.max_db:.1f} dB (limit {LIMIT_DB:g} dB)"]
+                if self.storage is not None
+                else []
+            ),
             f"result      {verdict}",
         ]
 
@@ -269,6 +310,7 @@ def verify_take(p: Patch, *, k: int = K, taps: Floats | None = None, workers: in
     ref = reference(p, REFERENCE, k=k, taps=taps, workers=workers)
     finer = reference(p, CHECK, k=k, taps=taps, workers=workers)
     return Verification(
+        storage=stored_error(p, k, workers),
         take=p.take,
         error=compare(ship.out, ref.out),
         convergence=compare(ref.out, finer.out),

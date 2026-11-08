@@ -8,7 +8,7 @@ import math
 import numpy as np
 import pytest
 
-from brightwork_synth import carrier, reference, render, voice
+from brightwork_synth import carrier, cli, reference, render, voice
 from brightwork_synth.patch import loads
 
 from .conftest import EXAMPLE, make, make_tone
@@ -193,3 +193,14 @@ def test_the_shipping_taps_given_explicitly_change_nothing() -> None:
     assert np.array_equal(render.synthesize(p, taps=taps).out, render.synthesize(p).out)
     given = reference.reference(p, reference.REFERENCE, taps=taps)
     assert np.array_equal(given.out, reference.reference(p, reference.REFERENCE).out)
+
+
+def test_a_stored_patch_is_verified_from_what_it_stored() -> None:
+    """Check what a stored patch stored from, before quantization, against the exact tables, and pass it."""
+    v = reference.verify_take(loads(cli.reference_text("machine-closed")))
+    assert v.storage is not None
+    assert v.storage.max_db <= LIMIT_DB
+    assert v.passed
+    assert "stored      before quantization" in str(v)
+    plain = reference.verify_take(make_tone())
+    assert plain.storage is None

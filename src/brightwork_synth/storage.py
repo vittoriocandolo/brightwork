@@ -7,8 +7,8 @@ A drum machine of the early eighties stored its cymbals as samples: a few bits, 
 out through a DAC that holds each value until the next, then filtered. Brightwork models that storage exactly:
 
 * **Stored.** The sum of the sources, gated but not yet damped, is taken at every D-th internal sample, where D is
-  the internal rate over `rate_hz`, rounded: the storage rate is F / D, within half a divisor step of the one asked
-  for. Nothing filters it first, so what lies above half that rate folds down, as it did.
+  the whole divider that makes the storage rate F / D the nearest to the one asked for. Nothing filters it
+  first, so what lies above half that rate folds down, as it did.
 * **Quantized.** Each stored value is rounded to `bits` bits against the stored sound's own peak, without dither:
   the noise this leaves sits a fixed distance under the peak, so a decaying cymbal turns grainy as it fades.
 * **Played back.** Each value is held for one storage period and smoothed by a Gaussian low-pass whose −3 dB point
@@ -42,8 +42,15 @@ MAX_PERIOD_ROUNDING_S = 1e-6  # how much longer than 1 / rate_hz a storage perio
 
 
 def divider(rate: int, rate_hz: float) -> int:
-    """Return the whole number D that makes F / D the nearest storage rate to `rate_hz` at internal rate F."""
-    return max(2, round(rate / rate_hz))
+    """Return the whole number D that makes F / D the nearest storage rate to `rate_hz` at internal rate F.
+
+    The nearer of the two whole dividers around F / rate_hz, judged by the rate
+    each gives, not by the period: rounding the period would pick the farther
+    rate between √(D(D + 1)) and D + ½.
+    """
+    ratio = rate / rate_hz
+    candidates = {max(2, math.floor(ratio)), max(2, math.ceil(ratio))}
+    return min(sorted(candidates), key=lambda d: abs(rate / d - rate_hz))
 
 
 def tail_s(settings: Storage) -> float:
@@ -94,15 +101,14 @@ class Stored:
         return first, last
 
     def at(self, t: ArrayLike) -> tuple[Floats, Floats]:
-        """Return the playback and its derivative at arbitrary times, summed value by value."""
+        """Return the playback and its derivative at arbitrary times, each summed over the values that reach it."""
         times = np.atleast_1d(np.asarray(t, dtype=float))
         y, dy = np.zeros_like(times), np.zeros_like(times)
-        if not times.size:
-            return y, dy
-        first, last = self._near(times)
-        for m in range(first, last):
-            y += self.values[m] * self.kernel(times - m / self.rate)
-            dy += self.values[m] * self.slope(times - m / self.rate)
+        for i, ti in enumerate(times):  # a few knots, each reached by the values of one filter span, not all between
+            first, last = self._near(np.array([ti]))
+            m = np.arange(first, last)  # empty past the last value's reach, where the sums are 0
+            y[i] = float(np.dot(self.values[m], self.kernel(ti - m / self.rate)))
+            dy[i] = float(np.dot(self.values[m], self.slope(ti - m / self.rate)))
         return y, dy
 
     def play(self, rate: int, n0: int, n1: int) -> Floats:

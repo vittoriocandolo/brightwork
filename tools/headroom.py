@@ -102,6 +102,7 @@ class Fixture:
         tabs = tables(v, ip.rate)
         self.x, _, _, stored = internal(v, self.rate, sample_count(v.t_src, self.rate), ip, tabs)
         self.kinks = kink_terms(v, ip, tabs, stored)
+        self.knees = slew_of(self.x).knees  # the search's candidates, the same at every drive
         self.band = FAMILY[p.output.sample_rate] / 2
         u = np.concatenate(([0.0], self.x))  # every step from silence on
         a, b = u[:-1], u[1:]
@@ -141,7 +142,7 @@ def candidates(knees: Knees, d0: float, *, up: bool) -> list[float]:
 def _edge(fixture: Fixture, d0: float, *, here: bool) -> tuple[float, int]:
     """Find, by full renders, the first drive from d0 at which the status changes, and count the renders."""
     reference, renders, prev = (math.inf if here else -math.inf), 0, d0
-    for d in candidates(slew_of(fixture.x).knees, d0, up=here):
+    for d in candidates(fixture.knees, d0, up=here):
         renders += 1
         if fixture.inside(d) != here:
             inside, outside = (prev, d) if here else (d, prev)

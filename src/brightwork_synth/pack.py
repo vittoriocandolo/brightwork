@@ -12,10 +12,11 @@ brings the loudest file to the target. Level matching instead scales each file
 to the loudness of its layer's first.
 
 The velocity mapping follows a square law, 40·log₁₀(v/127) dB, per key. Each
-layer sits at the velocity where the law reaches its loudness relative to the
-key's loudest layer, and layers meet halfway between, in dB. Each layer's group
-carries a curve point at every velocity in its range, so the level follows
-the law across layer boundaries.
+layer's velocities run up to the one where the law reaches its loudness
+relative to the key's loudest layer, from just above the softer layer's, and
+its group carries a curve point at every velocity in its range, so the level
+follows the law at every velocity and no take ever plays louder than it was
+rendered.
 
 Chokes: `--choke 46:42,44` puts keys 42 and 44 in one SFZ group and turns key
 46 off whenever one of them plays (`group`, `off_by`), fading over the release

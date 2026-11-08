@@ -211,6 +211,12 @@ purpose: `bits` above 0 turns it on.
 The sources are synthesized as always and stored as they sound, so any
 patch, a ride or a shaker as well as a hat, can be stored.
 
+Played back, a stored sound comes a little after its sources, as a real
+machine's does: by half a stored period and the filter's delay, 0.11 ms for
+`machine-closed` and at most about 1.2 ms (4 kHz through a 1 kHz filter).
+The report says how much; against other drums, place the file that much
+early.
+
 ### Damper
 
 `damper.amp` multiplies every source: 1 until damped, then down to 0 at its

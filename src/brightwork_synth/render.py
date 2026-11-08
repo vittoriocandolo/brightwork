@@ -5,9 +5,10 @@
 
     out[m] = p · g · Σ_{k<L} h[k] y[mK − k],    y[n] = y(n / F) for 0 ≤ n < N, else 0
 
-The internal rate is F = K × base, with base 44.1 or 48 kHz. The 88.2 and
-96 kHz exports reuse their family's F and filter with factor K/2, so a 96 kHz
-file is exactly the 48 kHz file with the in-between samples filled in.
+The internal rate is F = K × base, with base 44.1 or 48 kHz. The 2× and 4×
+exports (88.2, 96, 176.4 and 192 kHz) reuse their family's F and filter with
+factor K/2 or K/4, so a 96 kHz file is exactly the 48 kHz file with the
+in-between samples filled in.
 Nothing trims, fades, high-passes or removes DC, and the whole filter tail
 is kept.
 
@@ -38,7 +39,7 @@ from . import __version__, carrier, spectrum, wav
 from .loudness import momentary_max
 from .patch import Noise, Patch, Tone, describe_pitch, dumps
 from .spectrum import MAX_TAKE
-from .storage import divider
+from .storage import REACH, divider, sigma
 from .voice import (
     Kinks,
     Slew,
@@ -59,7 +60,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import ArrayLike, NDArray
 
-    from .patch import Output
+    from .patch import Output, Storage
 
 type Floats = NDArray[np.float64]
 
@@ -156,10 +157,10 @@ def decimate(
     """Return out[m] = Σ_k h[k] y[m·factor − k], y zero outside the render, each output always computed alike.
 
     The outputs form stride / factor interleaved streams, each a decimation by
-    `stride` of the input advanced by a multiple of the factor. A 2× export
-    passes its family's factor as the stride, so its even outputs are the base
-    rate's own stream and a 96 kHz file is the 48 kHz file with samples filled
-    in, bit for bit.
+    `stride` of the input advanced by a multiple of the factor. A 2× or 4×
+    export passes its family's factor as the stride, so every second or fourth
+    output is the base rate's own stream and a 96 kHz file is the 48 kHz file
+    with samples filled in, bit for bit.
 
     A stream runs in blocks of OUTPUTS outputs aligned to m = 0. A block's
     inputs are laid out in rows of ROW samples, and one matrix product with G
@@ -1001,10 +1002,22 @@ def storage_line(p: Patch, rate: int) -> str | None:
     if not st.bits:
         return None
     d = divider(rate, st.rate_hz)
+    late = playback_delay_ms(st, rate)
     return (
         f"{st.bits} bits at {rate / d:.6g} Hz (the internal rate / {d}), quantized against the sound's peak, "
-        f"played back through a low-pass at {st.filter_hz:g} Hz"
+        f"played back through a low-pass at {st.filter_hz:g} Hz, which sounds {late:.2f} ms after the sources: "
+        f"against other drums, place it that much early"
     )
+
+
+def playback_delay_ms(st: Storage, rate: int) -> float:
+    """Return how late a stored sound sounds against its sources, in ms: the filter's delay and half a held value.
+
+    The playback is each value held for a period T and smoothed by a Gaussian
+    delayed by L = 8σ so that it is causal; its centre lies L + T/2 after the
+    value, as a real drum machine's DAC and filter delay its sound.
+    """
+    return 1000 * (REACH * sigma(st.filter_hz) + divider(rate, st.rate_hz) / rate / 2)
 
 
 def render(p: Patch) -> tuple[NDArray[np.float32], Report]:

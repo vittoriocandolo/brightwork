@@ -19,6 +19,7 @@ SIX_BITS = Storage(6, 32000.0, 12000.0)
 ROUNDING = 1e-12  # how close the playback's sums come to their exact values
 SILENT = 1e-15  # the Gaussian's tails, kept to 8σ
 FASTEST = 2  # the smallest divider
+RATIO_NEARER = 15  # the divider whose rate is nearest to F / 14.495
 ROUNDING_DB = -200.0  # below which an error against the reference is rounding
 
 
@@ -37,6 +38,11 @@ def test_the_storage_rate_is_the_internal_rate_over_the_nearest_whole_divider() 
     assert storage.divider(F, 32000.0) == F // 32000
     assert storage.divider(1411200, 32000.0) == round(1411200 / 32000)
     assert storage.divider(F, 1e9) == FASTEST  # never faster than every other internal sample
+    # At F / rate_hz = 14.495, past √(14·15) = 14.491 but short of 14.5, the period rounds to 14 while F / 15 is
+    # the nearer rate.
+    ratio = 14.495
+    assert storage.divider(F, F / ratio) == RATIO_NEARER
+    assert abs(F / RATIO_NEARER - F / ratio) < abs(F / (RATIO_NEARER - 1) - F / ratio)
 
 
 def test_values_are_rounded_to_their_bits_against_the_peak() -> None:
@@ -143,3 +149,26 @@ def test_storage_is_validated() -> None:
     assert any(m.startswith("storage.filter_hz") for m in reject(**{"storage.filter_hz": 30000.0}))
     on = loads(cli.reference_text("closed"))
     assert on.storage.bits == 0  # every reference ships without storage
+
+
+def test_the_playback_at_a_few_times_sums_only_the_values_that_reach_them() -> None:
+    """Find the playback at knots far apart equal to the sum over every value, from only the values in reach."""
+    rng = np.random.default_rng(2)
+    st = stored(list(rng.uniform(-1, 1, 4000)))
+    times = np.array([0.001, 0.05, 0.11])
+    y, dy = st.at(times)
+    m = np.arange(st.values.size)
+    for t, a, b in zip(times, y, dy, strict=True):
+        assert a == pytest.approx(float(np.dot(st.values, st.kernel(t - m / st.rate))), abs=1e-12)
+        assert b == pytest.approx(float(np.dot(st.values, st.slope(t - m / st.rate))), abs=1e-6)
+
+
+def test_the_report_says_how_late_a_stored_sound_sounds() -> None:
+    """Find a held value's playback centred the filter's delay and half a period after it, as the report says."""
+    held = stored([1.0])
+    n = held.divider + int(2 * storage.REACH * held.sigma * F) + 2
+    y = held.play(F, 0, n)
+    centre_ms = 1000 * float(np.sum(np.arange(n) * y) / np.sum(y)) / F
+    late = render.playback_delay_ms(Storage(6, F / held.divider, 12000.0), F)
+    assert centre_ms == pytest.approx(late, abs=1000 / F)
+    assert f"sounds {late:.2f} ms after the sources" in str(render.render(closed())[1])
