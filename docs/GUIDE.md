@@ -171,8 +171,9 @@ sounds through drive and the damper like the rest of the source.
 of collisions, as a shaker's beads or a tambourine's jingles, and what rings
 at each one is the source itself, its band, modes or partials.
 
-- `grains_hz` is how many collisions a second at the shape's peak. They thin
-  out with the shape, so a shake that dies away clicks ever more sparsely.
+- `grains_hz` is how many collisions a second at the shape's peak, from
+  0.125, one in the longest sound, to 4,000. They thin out with the shape, so
+  a shake that dies away clicks ever more sparsely.
 - `grain_ms` is how long each one rings, down 60 dB: a few milliseconds for
   beads on a shell, tens of milliseconds for jingles.
 - The shape is the gesture: one shake, a push and a pull, or a tambourine's

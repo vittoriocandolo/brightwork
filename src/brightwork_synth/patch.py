@@ -53,6 +53,7 @@ MIN_GRAIN_MS, MAX_GRAIN_MS = 1.0, 1000.0  # how long a collision rings
 MAX_OVERLAP = 64.0  # collisions ringing at once, at the shape's peak
 MODES = ("gain", "peak", "true-peak")  # the output's: a gain, or a sample or true peak target at or below full scale
 MAX_MS = 8000.0  # every carrier repeats after 8 s
+MIN_GRAINS_HZ = 1000.0 / MAX_MS  # slower, even the longest sound holds less than one collision: no rattle
 MAX_NOISE = 4
 MAX_TONES = 2
 MAX_PARTIALS = 16
@@ -381,6 +382,13 @@ def _validate_common(s: Noise | Tone, path: str, f_ref: float | None, problems: 
     problems.number(f"{path}.chatter", s.chatter, 0.0, 1.0)
     problems.number(f"{path}.chatter_hz", s.chatter_hz, 10.0, 4000.0)
     rate = problems.number(f"{path}.grains_hz", s.grains_hz, 0.0, MAX_GRAINS_HZ)
+    if rate is not None and 0 < rate < MIN_GRAINS_HZ:
+        problems.add(
+            f"{path}.grains_hz",
+            f"{rate:g} collisions per second leave less than one in {MAX_MS / 1000:g} s, the longest sound, which is "
+            f"no rattle; at least {MIN_GRAINS_HZ:g}, or 0 for none",
+        )
+        rate = None
     ring = problems.number(f"{path}.grain_ms", s.grain_ms, MIN_GRAIN_MS, MAX_GRAIN_MS)
     if rate is not None and ring is not None and rate * ring / 1000 > MAX_OVERLAP:
         problems.add(

@@ -9,7 +9,7 @@ import math
 import numpy as np
 import pytest
 
-from brightwork_synth import rattle, reference, render, voice
+from brightwork_synth import patch, rattle, reference, render, voice
 from brightwork_synth.curve import amplitude_curve
 
 from .conftest import make
@@ -149,5 +149,9 @@ def test_rattles_are_validated() -> None:
     assert any(m.startswith("noise[1].grain_ms") for m in reject(**{"noise[1].grain_ms": 0.5}))
     found = reject(**{"noise[1].grains_hz": 4000.0, "noise[1].grain_ms": 20.0})
     assert "noise[1].grains_hz: 4000 collisions per second ringing 20 ms each overlap 80 at once" in found[0]
+    for slow in (5e-324, 1e-300, 0.1):
+        [problem] = reject(**{"noise[1].grains_hz": slow})
+        assert problem.startswith(f"noise[1].grains_hz: {slow:g} collisions per second leave less than one in 8 s")
+    assert make(**{"noise[1].grains_hz": patch.MIN_GRAINS_HZ}).noise[0].grains_hz == patch.MIN_GRAINS_HZ
     v = voice.voice(make(**SHAKER))
     assert v.sources[1].grains is None  # silent: nothing to rattle
