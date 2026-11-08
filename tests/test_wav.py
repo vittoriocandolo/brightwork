@@ -271,7 +271,12 @@ def test_refuses_what_is_not_a_readable_wave(tmp_path: Path) -> None:
     fmt = struct.pack("<HHIIHH", 1, 1, 48000, 0, 0, 12)
     body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", 0)
     path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
-    with pytest.raises(ValueError, match=r"unsupported format \(12-bit samples, 1 channel\)"):
+    with pytest.raises(ValueError, match=r"unsupported format \(12-bit samples, 1 channel, 48000 Hz\)"):
+        wav.read(path)
+    fmt = struct.pack("<HHIIHH", 1, 1, 0, 0, 2, 16)
+    body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", 0)
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    with pytest.raises(ValueError, match=r"unsupported format \(16-bit samples, 1 channel, 0 Hz\)"):
         wav.read(path)
 
 
