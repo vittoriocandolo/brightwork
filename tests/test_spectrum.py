@@ -9,8 +9,10 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from brightwork_synth import patch, wav
+from brightwork_synth import patch, render, wav
 from brightwork_synth import spectrum as sp
+
+from .conftest import make
 
 SIGNIFICANCE = 1e-3  # a statistical test fails below this p-value
 TOP_HZ = 20000.0
@@ -232,6 +234,7 @@ def test_layout_steps_and_windows() -> None:
         assert top > 0
         assert lay.step == pytest.approx(1 / (2 * top))
     assert sp.layout(300.0, 0.0, 0.0).count == 1
+    assert sp.layout(300.0, 5e-324, 0.0) == sp.layout(300.0, 0.0, 0.0)  # its next centre lies past every float
     assert sp.worst_compression(300.0, 1.0, 0.0) == pytest.approx(20000 / 300)
     assert sp.worst_compression(20000.0, 3.0, 3.0) == 1.0
 
@@ -296,3 +299,12 @@ def test_the_names_that_seed_and_mark_a_render_never_change() -> None:
     )
     assert patch.INSTRUMENT == "cymbal"
     assert wav.PRIVATE == b"cymb"
+
+
+@pytest.mark.parametrize("field", ["damping", "bloom"])
+def test_a_subnormal_damping_or_bloom_sounds_as_none(field: str) -> None:
+    """Render the smallest float of damping or bloom exactly as none, where its sub-bands' step would overflow."""
+    edits = {f"noise[{i}].{f}": 0.0 for i in range(2) for f in ("damping", "bloom")}
+    none = render.render(make(**edits))[0]
+    tiny = render.render(make(**{**edits, f"noise[0].{field}": 5e-324}))[0]
+    np.testing.assert_array_equal(tiny, none)

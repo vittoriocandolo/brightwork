@@ -54,6 +54,31 @@ def test_init_writes_complete_patches(capsys: pytest.CaptureFixture[str], name: 
     assert loads(out) == loads(cli.reference_text(name))
 
 
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (b"{", "the embedded patch is damaged"),
+        (b"[" * 100_000, "the embedded patch is damaged"),
+        (b'{"patch": 5}', "the embedded patch is damaged"),
+        (b'{"patch": "\\u001b]52;c;cHduZWQ=\\u0007"}', "holds control characters (U+0007, U+001B)"),
+        (b'{"patch": "# hat\\u009b2J"}', "holds control characters (U+009B)"),
+    ],
+)
+def test_extract_prints_only_an_intact_patch(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    body: bytes,
+    message: str,
+) -> None:
+    """Refuse a chunk that is garbled, nested to exhaust the parser or not text, or text a terminal would act on."""
+    chunk = wav.PRIVATE + len(body).to_bytes(4, "little") + body + b"\0" * (len(body) % 2)
+    path = tmp_path / "odd.wav"
+    path.write_bytes(b"RIFF" + (4 + len(chunk)).to_bytes(4, "little") + b"WAVE" + chunk)
+    code, out, err = run(capsys, "extract", path)
+    assert (code, out) == (BAD_INPUT, "")
+    assert message in err
+
+
 def test_render_and_extract(capsys: pytest.CaptureFixture[str], tmp_path: Path, example: Path) -> None:
     """Render the example to the very samples `render` makes, report it, and extract its exact patch."""
     out = tmp_path / "hat.wav"

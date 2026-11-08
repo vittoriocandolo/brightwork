@@ -348,6 +348,35 @@ def test_no_velocity_plays_a_take_louder_than_it_was_rendered() -> None:
     assert "volume=" not in kit.sfz()
 
 
+@pytest.mark.parametrize(
+    ("name", "holds"),
+    [
+        ("closed\n<region> sample=other.wav key=1", "U+000A < > ="),
+        ("closed $KEY", "$"),
+        ("closed // old", "//"),
+        ("closed /* old", "/*"),
+        ("closed\\..", "\\"),
+        ("closed\u2028two", "U+2028"),
+    ],
+)
+def test_kits_refuse_names_a_map_would_misread(name: str, holds: str) -> None:
+    """Refuse a layer or kit name that would add to, or break, the SFZ map it is written in."""
+    [(_, p)] = ladder("closed", (0,))
+    with pytest.raises(pack.PackError, match=re.escape(f"it holds {holds};")):
+        pack.build([(42, [(name, p)])])
+    with pytest.raises(pack.PackError, match="a sampler trims the space around it"):
+        pack.build([(42, [("closed", p)])], stem="kit ")
+
+
+def test_the_command_refuses_a_patch_named_to_misread(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Run `brightwork pack` on a file named to add a region to the map, and write nothing."""
+    evil = tmp_path / "closed\n<region> sample=other.wav key=1.toml"
+    evil.write_text(cli.reference_text("closed"), encoding="utf-8")
+    assert cli.main(["pack", f"42={evil}", "--out", str(tmp_path / "kit")]) == BAD_INPUT
+    assert "cannot name a file in an SFZ map" in capsys.readouterr().err
+    assert not (tmp_path / "kit").exists()
+
+
 def test_kits_refuse_impossible_options() -> None:
     """Refuse an empty kit or key, a release that is not a positive time, and more files than a kit holds."""
     [(_, loud)] = ladder("closed", (0,))

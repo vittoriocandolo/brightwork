@@ -505,6 +505,12 @@ def test_programmatic_parts_must_have_their_types() -> None:
         assert problem in problems(dataclasses.replace, p, **edits)
 
 
+def test_toml_nested_to_exhaust_the_parser_is_a_patch_error() -> None:
+    """Parse arrays nested a hundred thousand deep, and get a patch error rather than a crash."""
+    with pytest.raises(PatchError, match="nested too deeply to be a patch"):
+        loads("x = " + "[" * 100_000 + "]" * 100_000 + "\n")
+
+
 def test_toml_syntax_errors_are_patch_errors() -> None:
     """Report a TOML syntax error as a patch's problem."""
     assert problems(loads, 'instrument = "cymbal"\nschema = 1\n[drive\n')[0].startswith("TOML:")

@@ -25,7 +25,8 @@ evidence are in [DESIGN.md](DESIGN.md) and [VALIDATION.md](VALIDATION.md).
    `brightwork pack 42=closed.toml,closed-8.toml 44=pedal.toml 46=open.toml --choke 46:42,44 --takes 8 --out hats/`.
 
 Every file is exact and reproducible: `brightwork extract` gives back the exact
-patch of any exported file, take included.
+patch of any exported file, take included. It never prints text holding
+control characters, which no patch does and a terminal would act on.
 
 ## The references
 
@@ -417,7 +418,10 @@ layer plays its patch's take + j − 1, or with `--stereo` a pair).
   their natural balance.
 - Files are named `<key>_<stem>_v<top velocity>_rr<take>.wav`, such as
   `42_closed_v127_rr1.wav`, so they also map by hand in samplers that do not
-  read SFZ.
+  read SFZ. A patch or folder whose name a sampler would read as part of the
+  map, one holding `<`, `>`, `=`, `$`, a backslash, a comment's start, a
+  control character or a line break, or beginning or ending with a space, is
+  refused: rename it.
 - `<DIR>/<DIR>.sfz` maps them. Velocity follows a square law,
   40·log₁₀(v/127) dB, per key: a layer's velocities run up to its own, where
   the law reaches its loudness relative to the key's loudest, and its group

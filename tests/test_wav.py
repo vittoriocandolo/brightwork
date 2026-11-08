@@ -275,6 +275,27 @@ def test_refuses_what_is_not_a_readable_wave(tmp_path: Path) -> None:
         wav.read(path)
 
 
+@pytest.mark.parametrize(
+    ("chunks", "message"),
+    [
+        (((b"fmt ", b"\1\0"), (b"data", b"\0\0")), "a fmt or smpl chunk is cut short"),
+        (((b"smpl", b"\0"),), "a fmt or smpl chunk is cut short"),
+        (((wav.PRIVATE, b"{"),), "the embedded patch is damaged"),
+        (((wav.PRIVATE, b"[" * 100_000),), "the embedded patch is damaged"),
+        (((wav.PRIVATE, b"[1]"),), "the embedded patch is damaged"),
+    ],
+)
+def test_refuses_a_damaged_chunk(tmp_path: Path, chunks: tuple[tuple[bytes, bytes], ...], message: str) -> None:
+    """Refuse a fmt or smpl chunk cut short, and an embedded patch garbled, nested too deep or not a table."""
+    fmt = struct.pack("<HHIIHH", wav.PCM, 1, 48000, 96000, 2, 16)
+    body = b"".join(c + struct.pack("<I", len(d)) + d + b"\0" * (len(d) % 2) for c, d in (*chunks, (b"fmt ", fmt)))
+    body += b"data" + struct.pack("<I", 2) + b"\0\0"
+    path = tmp_path / "x.wav"
+    path.write_bytes(b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body)
+    with pytest.raises(ValueError, match=message):
+        wav.read(path)
+
+
 def test_every_rate_writes_a_valid_file(tmp_path: Path) -> None:
     """Write a valid file at every export rate."""
     for rate in SAMPLE_RATES:

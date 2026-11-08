@@ -271,9 +271,11 @@ class Layout:
 def layout(f_ref: float, damping: float, bloom: float) -> Layout:
     """Neighbouring sub-bands differ by at most √2 in compression and stretch, up to the first centre ≥ 20 kHz."""
     top = max(damping, bloom)
-    if top == 0 or f_ref >= TOP_HZ:
+    step = 1.0 / (2.0 * top) if top else math.inf
+    # One sub-band when nothing compresses, or when so little does, a subnormal top, that the next centre lies past
+    # every representable frequency: its window there is exactly 0 for every audible one.
+    if math.isinf(step) or f_ref >= TOP_HZ:
         return Layout(f_ref, 0.0, 1)
-    step = 1.0 / (2.0 * top)
     return Layout(f_ref, step, 1 + math.ceil(math.log2(TOP_HZ / f_ref) / step))
 
 
