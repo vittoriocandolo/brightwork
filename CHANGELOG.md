@@ -68,3 +68,10 @@ The first public release.
 - `brightwork pack`: kits of keys with velocity layers on a square law, takes
   as round robins and choke groups, mapped by an SFZ file and checked in
   sfizz and liquidsfz.
+- Input that cannot be misread: a kit whose names a sampler would read as
+  part of its SFZ map is refused; `brightwork extract` never prints control
+  characters, which a terminal would act on; WAVs, embedded chunks and patches
+  are read with every size checked, so a damaged or crafted file is refused
+  with its reason; beds and samples holding values that are not numbers are
+  refused before they reach the device. Releases are published with
+  attestations of where they were built.
