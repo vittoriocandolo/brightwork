@@ -215,7 +215,7 @@ def test_each_note_plays_its_key_layer_and_round_robin(played: Played) -> None:
 
 def test_velocity_follows_the_square_law_across_layers(played: Played) -> None:
     """Play a softer layer on the square law from the loudest, and every take of a layer at one gain."""
-    # The player scales each file by its group's volume and curve point. Each layer's curve is set from its first
+    # The player scales each file by its group's curve point. Each layer's curve is set from its first
     # take's loudness, so a first take sounds at exactly 40·log10(v/127) dB from the loudest layer's first take at
     # 127, and every take of a layer gets the same gain at the same velocity.
     kit, _, y, files = played

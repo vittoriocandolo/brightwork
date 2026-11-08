@@ -413,10 +413,11 @@ layer plays its patch's take + j − 1, or with `--stereo` a pair).
   `42_closed_v127_rr1.wav`, so they also map by hand in samplers that do not
   read SFZ.
 - `<DIR>/<DIR>.sfz` maps them. Velocity follows a square law,
-  40·log₁₀(v/127) dB, per key: each layer sits where the law reaches its
-  loudness relative to the key's loudest, neighbours meet halfway in dB, and
-  each layer's group carries a curve point at every velocity in its range, so
-  the level follows the law across layer boundaries. Takes cycle in sequence,
+  40·log₁₀(v/127) dB, per key: a layer's velocities run up to its own, where
+  the law reaches its loudness relative to the key's loudest, and its group
+  carries a curve point at every velocity below it, so the level follows the
+  law across layer boundaries and no velocity plays a take louder than it was
+  rendered. Takes cycle in sequence,
   every sample plays through, and nothing transposes.
 - **Chokes.** `--choke 46:42,44` puts keys 42 and 44 in one group and turns
   key 46 off whenever either plays, fading over the release rather than

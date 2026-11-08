@@ -26,7 +26,6 @@ one choke group only, so rules that would need two are refused.
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import math
 import multiprocessing
 import os
@@ -69,7 +68,6 @@ type Rule = tuple[int, tuple[int, ...]]  # a choke rule: the key choked, and the
 type Group = tuple[int, list[tuple[str, Patch]]]  # a key, and its layers' names and patches, loudest first
 
 MAX_FILES = 4096  # files in one kit
-LOUD_VOLUME_DB = 6.0  # the group volume above which some players stop
 
 
 class PackError(RuntimeError):
@@ -100,7 +98,6 @@ class Layer:
     relative_db: float  # to the key's loudest layer
     lovel: int
     hivel: int
-    volume_db: float  # the group's volume, which with the curve places the layer on the square law
     curve: tuple[float, ...]  # amplitude at lovel … hivel, at most 1
     takes: tuple[tuple[int, ...], ...]  # per file, the takes it holds: one, or two for a stereo pair
     file_loudness: tuple[float, ...]
@@ -132,29 +129,33 @@ class Key:
 def velocity_ranges(relative_db: list[float]) -> list[tuple[int, int]]:
     """Return (lovel, hivel) per layer, loudest first, from each layer's loudness relative to the loudest.
 
-    Layer i sits where 40·log₁₀(v/127) reaches its level; neighbours meet at the
-    geometric mean of their velocities, halfway in dB.
+    A layer's velocities run up to its own, the velocity where 40·log₁₀(v/127)
+    reaches its level, from just above the softer layer's own. So the map only
+    ever lowers a take, never plays it louder than it was rendered, and the
+    law holds at every velocity.
     """
-    natural = [127.0 * 10.0 ** (d / 40.0) for d in relative_db]
-    bounds = [127.0, *(math.sqrt(a * b) for a, b in itertools.pairwise(natural)), 0.0]
-    ranges = [(math.floor(bounds[i + 1]) + 1, math.floor(bounds[i])) for i in range(len(natural))]
+    own = [math.floor(127.0 * 10.0 ** (d / 40.0) + 1e-9) for d in relative_db]  # the law's inverse
+    lows = [*(hi + 1 for hi in own[1:]), 1]
+    ranges = list(zip(lows, own, strict=True))
     for i, (lo, hi) in enumerate(ranges):
         if lo > hi:
-            msg = f"layers {i} and {i + 1} are too close in loudness to get velocities of their own"
+            msg = (
+                f"layers {i + 1} and {i + 2} are within a velocity step of each other in loudness"
+                if i + 1 < len(ranges)
+                else f"layer {i + 1} is {-relative_db[i]:.1f} dB under the loudest, below the square law at velocity 1"
+            )
             raise PackError(msg)
     return ranges
 
 
-def curve_for(relative_db: float, lovel: int, hivel: int) -> tuple[float, tuple[float, ...]]:
-    """Return the group volume in dB and the amplitude curve over lovel … hivel that put a layer on the square law.
+def curve_for(relative_db: float, lovel: int, hivel: int) -> tuple[float, ...]:
+    """Return the amplitude over lovel … hivel that puts a layer on the square law, never above 1.
 
     At velocity v the level should be 40·log₁₀(v/127) dB, and the layer's own
-    level is relative_db, so its gain is (v/127)² / 10^(relative_db/20). The
-    curve is that gain over its largest value, which becomes the volume.
+    level is relative_db, so its gain is (v/127)² / 10^(relative_db/20): at most
+    1 up to the layer's own velocity, where its range ends.
     """
-    gains = [(v / 127.0) ** 2 / 10.0 ** (relative_db / 20.0) for v in range(lovel, hivel + 1)]
-    top = max(gains)
-    return 20.0 * math.log10(top), tuple(g / top for g in gains)
+    return tuple((v / 127.0) ** 2 / 10.0 ** (relative_db / 20.0) for v in range(lovel, hivel + 1))
 
 
 def choke_groups(rules: Iterable[Rule], kit_keys: Iterable[int]) -> dict[int, tuple[int | None, int | None]]:
@@ -261,7 +262,6 @@ class Kit:
                     f"lovel={layer.lovel}",
                     f"hivel={layer.hivel}",
                     f"seq_length={len(layer.takes)}",
-                    f"volume={layer.volume_db:.4f}",
                     *choke,
                 ]
                 # Ten decimals keep six significant digits down to velocity 1 of a 127-wide layer, (1/127)².
@@ -302,12 +302,6 @@ class Kit:
                     f"velocities {layer.lovel}–{layer.hivel}{spread}; {status}"
                 )
                 rows.append((f"key {k.key}" if i == 1 else "", text))
-                if layer.volume_db > LOUD_VOLUME_DB:
-                    loud = (
-                        f"its group volume is {layer.volume_db:+.1f} dB; some players stop at +6 dB, so "
-                        "keep neighbouring layers within 12 dB"
-                    )
-                    rows.append(("", loud))
             if k.off_by is not None:
                 by = ", ".join(map(str, groups[k.off_by]))
                 rows.append(
@@ -423,7 +417,7 @@ def _layers(group: Group, rows: range, r: Rendered, set_gain: float) -> tuple[li
     relative = [x - firsts[0] for x in firsts]
     layers, audio = [], []
     for a, (i, (name, p), (lo, hi)) in enumerate(zip(rows, patches, velocity_ranges(relative), strict=True)):
-        volume, curve = curve_for(relative[a], lo, hi)
+        curve = curve_for(relative[a], lo, hi)
         files = tuple(
             output_stage(f, set_gain * g, p.output.polarity) for f, g in zip(r.raw[i], r.gains[i], strict=True)
         )
@@ -441,7 +435,6 @@ def _layers(group: Group, rows: range, r: Rendered, set_gain: float) -> tuple[li
                 relative[a],
                 lo,
                 hi,
-                volume,
                 curve,
                 r.held[i],
                 loudness,
