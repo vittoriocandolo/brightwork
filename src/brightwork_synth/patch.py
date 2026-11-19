@@ -63,35 +63,136 @@ MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as wr
 PAIR = 2  # a knot, a partial and a band are two numbers each
 
 
+# Every field's check. Each reports every problem it finds, with its field's path, and returns what it checked,
+# which the fields after it may need: a rattle's ring needs its rate.
+
+type Check = Callable[[_Problems, str, Any, dict[str, Any]], Any]  # (problems, path, value, checked so far)
+
+
+def _range(lo: float, hi: float, *, silence: bool = False) -> Check:
+    """Check a number within lo … hi, or -inf where silence is allowed."""
+    return lambda problems, path, v, _checked: problems.number(path, v, lo, hi, silence=silence)
+
+
+def _one_of_numbers(allowed: tuple[int, ...]) -> Check:
+    """Check an integer that is one of those allowed."""
+    return lambda problems, path, v, _checked: problems.integer(path, v, allowed)
+
+
+def _one_of(allowed: tuple[str, ...]) -> Check:
+    """Check a string that is one of those allowed."""
+    return lambda problems, path, v, _checked: problems.choice(path, v, allowed)
+
+
+def _edges(problems: _Problems, path: str, band: object, _checked: dict[str, Any]) -> object:
+    """Check a band: two frequencies, the low one below the high one."""
+    return problems.band(path, band)
+
+
+def _shape(problems: _Problems, path: str, amp: object, _checked: dict[str, Any]) -> object:
+    """Check an amplitude shape."""
+    return problems.shape(path, amp)
+
+
+def _spacing(problems: _Problems, path: str, spacing: object, _checked: dict[str, Any]) -> object:
+    """Check a noise's mode spacing: 0 for continuous noise, else 1 Hz or more."""
+    hz = problems.number(path, spacing, 0.0, MAX_SPACING)
+    if hz is not None and 0 < hz < 1:
+        problems.add(path, f"{hz:g} Hz: modes need 1 … {MAX_SPACING:g} Hz, or 0 for noise")
+    return hz
+
+
+def _grains(problems: _Problems, path: str, grains: object, _checked: dict[str, Any]) -> object:
+    """Check a rattle's rate: 0 for none, else enough for one collision in the longest sound; None if not."""
+    rate = problems.number(path, grains, 0.0, MAX_GRAINS_HZ)
+    if rate is not None and 0 < rate < MIN_GRAINS_HZ:
+        problems.add(
+            path,
+            f"{rate:g} collisions per second leave less than one in {MAX_MS / 1000:g} s, the longest sound, which is "
+            f"no rattle; at least {MIN_GRAINS_HZ:g}, or 0 for none",
+        )
+        return None
+    return rate
+
+
+def _grain_ms(problems: _Problems, path: str, ring: object, checked: dict[str, Any]) -> object:
+    """Check how long each collision rings, and that the collisions ringing at once stay few enough."""
+    ms = problems.number(path, ring, MIN_GRAIN_MS, MAX_GRAIN_MS)
+    rate = checked["grains_hz"]
+    if rate is not None and ms is not None and rate * ms / 1000 > MAX_OVERLAP:
+        problems.add(
+            f"{path.removesuffix('.grain_ms')}.grains_hz",
+            f"{rate:g} collisions per second ringing {ms:g} ms each overlap {rate * ms / 1000:.4g} at once; "
+            f"at most {MAX_OVERLAP:g}, past which a rattle sounds as the plain source",
+        )
+    return ms
+
+
+def _partials(problems: _Problems, path: str, partials: object, _checked: dict[str, Any]) -> object:
+    """Check a tone's partials, and return the lowest."""
+    return _validate_partials(partials, path, problems)
+
+
+def _damper_amp(problems: _Problems, path: str, amp: object, _checked: dict[str, Any]) -> object:
+    """Check a damper: no knots, or from exactly 1 down to exactly 0, never increasing."""
+    if amp == ():
+        return amp
+    knots = problems.knots(path, amp, "gain", 2, MAX_MS)
+    if knots is None:
+        return None
+    gains = [g for _, g in knots]
+    if gains[0] != 1.0:
+        problems.add(f"{path}[1].gain", "a damper must start at exactly 1")
+    if gains[-1] != 0.0:
+        problems.add(f"{path}[{len(gains)}].gain", "a damper must end at exactly 0")
+    for i in range(1, len(gains)):
+        if gains[i] > gains[i - 1]:
+            problems.add(f"{path}[{i + 1}].gain", "a damper never increases")
+    return knots
+
+
+def _output_db(problems: _Problems, path: str, db: object, checked: dict[str, Any]) -> object:
+    """Check the output's dB: a gain up to +24 dB, or a peak target up to 0 dBFS."""
+    return problems.number(path, db, -60.0, 24.0 if checked["mode"] == "gain" else 0.0)
+
+
 @dataclass(frozen=True)
-class Toml:
-    """How a section's field is written in TOML: its kind, a pair's keys and the canonical comment.
+class Spec:
+    """How a section's field is read, checked and written: its kind, check, a pair's keys and its comments.
 
     A number is a float written exactly, an integer and a choice are written as
     they are, a band is [low, high] and pairs are an array of two-key inline
-    tables, written as `[]` with the `empty` comment when there are none.
-    Ranges, and every rule between fields, belong to validation.
+    tables, written as `[]` with the `empty` comment when there are none. The
+    check sees the fields checked before it, for the rules between fields.
     """
 
     kind: str  # "number", "integer", "choice", "band" or "pairs"
+    check: Check
     keys: tuple[str, str] = ("", "")
     note: str = ""
     empty: str = ""
 
 
-def _toml(kind: str, keys: tuple[str, str] = ("", ""), note: str = "", empty: str = "") -> dict[str, Toml]:
-    """Return a field's metadata: how it is written in TOML."""
-    return {"toml": Toml(kind, keys, note, empty)}
+def _spec(
+    kind: str,
+    check: Check,
+    keys: tuple[str, str] = ("", ""),
+    note: str = "",
+    empty: str = "",
+) -> dict[str, Spec]:
+    """Return a field's metadata: how it is read, checked and written."""
+    return {"spec": Spec(kind, check, keys, note, empty)}
 
 
-_NUMBER = _toml("number")
-_BAND = _toml("band")
-_SHAPE = _toml("pairs", ("ms", "gain"), "shape: 0 at both ends, peak exactly 1")
-_DAMPING = _toml("number", note="content at f decays (f / f_ref)^damping times faster")
-_BLOOM = _toml("number", note="and rises (f / f_ref)^bloom times slower")
-_CHATTER = _toml("number", note="0 … 1: gated at chatter_hz, as plates that slap")
-_GRAINS = _toml("number", note="collisions per second at the shape's peak, a rattle; 0 = none")
-_GRAIN_MS = _toml("number", note="each collision rings down 60 dB in this time")
+_LEVEL = _spec("number", _range(-90.0, 24.0, silence=True))
+_BAND = _spec("band", _edges)
+_SHAPE = _spec("pairs", _shape, ("ms", "gain"), "shape: 0 at both ends, peak exactly 1")
+_DAMPING = _spec("number", _range(0.0, 3.0), note="content at f decays (f / f_ref)^damping times faster")
+_BLOOM = _spec("number", _range(0.0, 3.0), note="and rises (f / f_ref)^bloom times slower")
+_CHATTER = _spec("number", _range(0.0, 1.0), note="0 … 1: gated at chatter_hz, as plates that slap")
+_CHATTER_HZ = _spec("number", _range(10.0, 4000.0))
+_GRAINS = _spec("number", _grains, note="collisions per second at the shape's peak, a rattle; 0 = none")
+_GRAIN_MS = _spec("number", _grain_ms, note="each collision rings down 60 dB in this time")
 
 
 class PatchError(ValueError):
@@ -107,13 +208,15 @@ class PatchError(ValueError):
 class Noise:
     """A noise source: continuous noise, or seeded modes at a mean spacing, through a band, under a shape."""
 
-    level_db: float = field(metadata=_NUMBER)
+    level_db: float = field(metadata=_LEVEL)
     band_hz: tuple[float, float] = field(metadata=_BAND)  # (low, high)
-    spacing_hz: float = field(metadata=_toml("number", note="mean distance between modes; 0 = continuous noise"))
+    spacing_hz: float = field(
+        metadata=_spec("number", _spacing, note="mean distance between modes; 0 = continuous noise"),
+    )
     damping: float = field(metadata=_DAMPING)
     bloom: float = field(metadata=_BLOOM)
     chatter: float = field(metadata=_CHATTER)
-    chatter_hz: float = field(metadata=_NUMBER)
+    chatter_hz: float = field(metadata=_CHATTER_HZ)
     grains_hz: float = field(metadata=_GRAINS)  # 0: no rattle
     grain_ms: float = field(metadata=_GRAIN_MS)
     amp: Knots = field(metadata=_SHAPE)  # ((ms, gain), ...)
@@ -128,17 +231,17 @@ class Noise:
 class Tone:
     """A tone: sine or band-limited square partials at fixed frequencies, through a band, under a shape."""
 
-    level_db: float = field(metadata=_NUMBER)
-    wave: str = field(metadata=_toml("choice", note='"sine" | "square"'))
-    phase: str = field(metadata=_toml("choice", note='"strike" | "free"'))
+    level_db: float = field(metadata=_LEVEL)
+    wave: str = field(metadata=_spec("choice", _one_of(WAVES), note='"sine" | "square"'))
+    phase: str = field(metadata=_spec("choice", _one_of(PHASES), note='"strike" | "free"'))
     partials: tuple[tuple[float, float], ...] = field(  # ((hz, level_db), ...)
-        metadata=_toml("pairs", ("hz", "level_db"), "loudest exactly 0 dB; at the nearest 1/8 Hz"),
+        metadata=_spec("pairs", _partials, ("hz", "level_db"), "loudest exactly 0 dB; at the nearest 1/8 Hz"),
     )
     band_hz: tuple[float, float] = field(metadata=_BAND)
     damping: float = field(metadata=_DAMPING)
     bloom: float = field(metadata=_BLOOM)
     chatter: float = field(metadata=_CHATTER)
-    chatter_hz: float = field(metadata=_NUMBER)
+    chatter_hz: float = field(metadata=_CHATTER_HZ)
     grains_hz: float = field(metadata=_GRAINS)
     grain_ms: float = field(metadata=_GRAIN_MS)
     amp: Knots = field(metadata=_SHAPE)
@@ -153,34 +256,50 @@ class Tone:
 class Storage:
     """Low-resolution storage, as in a drum machine's sample memory: off at 0 bits."""
 
-    bits: int = field(metadata=_toml("integer", note="0 = off; else 2 … 16, quantized against the sound's peak"))
-    rate_hz: float = field(metadata=_toml("number", note="stored at this rate, as near as the internal rate allows"))
-    filter_hz: float = field(metadata=_toml("number", note="played back through a low-pass, −3 dB here"))
+    bits: int = field(
+        metadata=_spec(
+            "integer",
+            _one_of_numbers(STORAGE_BITS),
+            note="0 = off; else 2 … 16, quantized against the sound's peak",
+        ),
+    )
+    rate_hz: float = field(
+        metadata=_spec(
+            "number",
+            _range(*STORAGE_RATES_HZ),
+            note="stored at this rate, as near as the internal rate allows",
+        ),
+    )
+    filter_hz: float = field(
+        metadata=_spec("number", _range(*STORAGE_FILTERS_HZ), note="played back through a low-pass, −3 dB here"),
+    )
 
 
 @dataclass(frozen=True)
 class Damper:
     """The damper, which multiplies every source: no knots, or a curve from 1 down to 0."""
 
-    amp: Knots = field(metadata=_toml("pairs", ("ms", "gain"), "from 1 down to 0", "no knots: never damped"))
+    amp: Knots = field(
+        metadata=_spec("pairs", _damper_amp, ("ms", "gain"), "from 1 down to 0", "no knots: never damped"),
+    )
 
 
 @dataclass(frozen=True)
 class Drive:
     """The saturator's small-signal gain in dB; 0 is bypass."""
 
-    db: float = field(metadata=_toml("number", note="small-signal gain; 0 = bypass"))
+    db: float = field(metadata=_spec("number", _range(0.0, 48.0), note="small-signal gain; 0 = bypass"))
 
 
 @dataclass(frozen=True)
 class Output:
     """The exported file: its sample rate, format, level and polarity."""
 
-    sample_rate: int = field(metadata=_toml("integer"))
-    format: str = field(metadata=_toml("choice", note='"float32" | "pcm24" | "pcm16"'))
-    mode: str = field(metadata=_toml("choice", note='"gain" | "peak" | "true-peak"'))
-    db: float = field(metadata=_toml("number", note="gain in dB, or peak target in dBFS"))
-    polarity: int = field(metadata=_toml("integer"))
+    sample_rate: int = field(metadata=_spec("integer", _one_of_numbers(SAMPLE_RATES)))
+    format: str = field(metadata=_spec("choice", _one_of(FORMATS), note='"float32" | "pcm24" | "pcm16"'))
+    mode: str = field(metadata=_spec("choice", _one_of(MODES), note='"gain" | "peak" | "true-peak"'))
+    db: float = field(metadata=_spec("number", _output_db, note="gain in dB, or peak target in dBFS"))
+    polarity: int = field(metadata=_spec("integer", _one_of_numbers((1, -1))))
 
 
 @dataclass(frozen=True)
@@ -382,13 +501,13 @@ def _validate(p: Patch, problems: _Problems) -> None:
         if not p.noise and not p.tone:
             problems.add("noise", "a patch needs at least one source, [[noise]] or [[tone]]")
         for j, s in enumerate(p.noise, 1):
-            _validate_noise(s, f"noise[{j}]", problems)
+            _validate_source(s, f"noise[{j}]", problems)
         for j, t in enumerate(p.tone, 1):
-            _validate_tone(t, f"tone[{j}]", problems)
-    _validate_storage(p.storage, problems)
-    _validate_damper(p.damper, problems)
-    _validate_drive(p.drive, problems)
-    _validate_output(p.output, problems)
+            _validate_source(t, f"tone[{j}]", problems)
+    _validate_part(p.storage, Storage, "a storage", problems)
+    _validate_part(p.damper, Damper, "a damper", problems)
+    _validate_part(p.drive, Drive, "a drive", problems)
+    _validate_part(p.output, Output, "an output", problems)
 
 
 def _validate_seed(seed: object, problems: _Problems) -> None:
@@ -407,29 +526,22 @@ def _validate_take(take: object, problems: _Problems) -> None:
         problems.add("take", f"{take} is outside 1 … 2**31")
 
 
-def _validate_common(s: Noise | Tone, path: str, f_ref: float | None, problems: _Problems) -> None:
-    """Check level, damping, bloom, chatter, rattle and shape, and the sub-bands they imply."""
-    problems.number(f"{path}.level_db", s.level_db, -90.0, 24.0, silence=True)
-    damping = problems.number(f"{path}.damping", s.damping, 0.0, 3.0)
-    bloom = problems.number(f"{path}.bloom", s.bloom, 0.0, 3.0)
-    problems.number(f"{path}.chatter", s.chatter, 0.0, 1.0)
-    problems.number(f"{path}.chatter_hz", s.chatter_hz, 10.0, 4000.0)
-    rate = problems.number(f"{path}.grains_hz", s.grains_hz, 0.0, MAX_GRAINS_HZ)
-    if rate is not None and 0 < rate < MIN_GRAINS_HZ:
-        problems.add(
-            f"{path}.grains_hz",
-            f"{rate:g} collisions per second leave less than one in {MAX_MS / 1000:g} s, the longest sound, which is "
-            f"no rattle; at least {MIN_GRAINS_HZ:g}, or 0 for none",
-        )
-        rate = None
-    ring = problems.number(f"{path}.grain_ms", s.grain_ms, MIN_GRAIN_MS, MAX_GRAIN_MS)
-    if rate is not None and ring is not None and rate * ring / 1000 > MAX_OVERLAP:
-        problems.add(
-            f"{path}.grains_hz",
-            f"{rate:g} collisions per second ringing {ring:g} ms each overlap {rate * ring / 1000:.4g} at once; "
-            f"at most {MAX_OVERLAP:g}, past which a rattle sounds as the plain source",
-        )
-    amp = problems.shape(f"{path}.amp", s.amp)
+def _check(section: Section, path: str, problems: _Problems) -> dict[str, Any]:
+    """Check a section's fields in order, each seeing those before it, and return what each checked."""
+    checked: dict[str, Any] = {}
+    for f in dataclasses.fields(section):
+        spec: Spec = f.metadata["spec"]
+        checked[f.name] = spec.check(problems, f"{path}.{f.name}", getattr(section, f.name), checked)
+    return checked
+
+
+def _validate_source(s: Noise | Tone, path: str, problems: _Problems) -> None:
+    """Check a source's fields, then the sub-bands its damping and bloom imply, from its reference frequency."""
+    checked = _check(s, path, problems)
+    band, damping, bloom = checked["band_hz"], checked["damping"], checked["bloom"]
+    f_ref = None if band is None else band[0]
+    if isinstance(s, Tone):
+        f_ref = None if f_ref is None or checked["partials"] is None else max(f_ref, checked["partials"])
     if f_ref is None or damping is None or bloom is None:
         return
     worst = worst_compression(f_ref, damping, bloom)
@@ -440,29 +552,10 @@ def _validate_common(s: Noise | Tone, path: str, f_ref: float | None, problems: 
             f"relative to {f_ref:g} Hz; at most {MAX_COMPRESSION:g}",
         )
         return
-    if amp is not None:
+    if checked["amp"] is not None:
         last = max(sub_band_ends(s))
         if last > MAX_MS:
             problems.add(f"{path}.bloom", f"its slowest sub-band would end at {last:.6g} ms, after {MAX_MS:g} ms")
-
-
-def _validate_noise(s: Noise, path: str, problems: _Problems) -> None:
-    """Check a noise source."""
-    band = problems.band(f"{path}.band_hz", s.band_hz)
-    spacing = problems.number(f"{path}.spacing_hz", s.spacing_hz, 0.0, MAX_SPACING)
-    if spacing is not None and 0 < spacing < 1:
-        problems.add(f"{path}.spacing_hz", f"{spacing:g} Hz: modes need 1 … {MAX_SPACING:g} Hz, or 0 for noise")
-    _validate_common(s, path, None if band is None else band[0], problems)
-
-
-def _validate_tone(s: Tone, path: str, problems: _Problems) -> None:
-    """Check a tone."""
-    problems.choice(f"{path}.wave", s.wave, WAVES)
-    problems.choice(f"{path}.phase", s.phase, PHASES)
-    band = problems.band(f"{path}.band_hz", s.band_hz)
-    lowest = _validate_partials(s.partials, f"{path}.partials", problems)
-    f_ref = None if band is None or lowest is None else max(band[0], lowest)
-    _validate_common(s, path, f_ref, problems)
 
 
 def _validate_partials(partials: object, path: str, problems: _Problems) -> float | None:
@@ -486,54 +579,13 @@ def _validate_partials(partials: object, path: str, problems: _Problems) -> floa
     return freqs[0]
 
 
-def _validate_damper(d: object, problems: _Problems) -> None:
-    """Check the damper: no knots, or from exactly 1 down to exactly 0, never increasing."""
-    if not isinstance(d, Damper):
-        problems.add("damper", "expected a damper section")
-        return
-    if d.amp == ():
-        return
-    knots = problems.knots("damper.amp", d.amp, "gain", 2, MAX_MS)
-    if knots is None:
-        return
-    gains = [g for _, g in knots]
-    if gains[0] != 1.0:
-        problems.add("damper.amp[1].gain", "a damper must start at exactly 1")
-    if gains[-1] != 0.0:
-        problems.add(f"damper.amp[{len(gains)}].gain", "a damper must end at exactly 0")
-    for i in range(1, len(gains)):
-        if gains[i] > gains[i - 1]:
-            problems.add(f"damper.amp[{i + 1}].gain", "a damper never increases")
-
-
-def _validate_storage(s: object, problems: _Problems) -> None:
-    """Check the storage: off, or a bit depth with its rate and its playback filter."""
-    if not isinstance(s, Storage):
-        problems.add("storage", "expected a storage section")
-        return
-    problems.integer("storage.bits", s.bits, STORAGE_BITS)
-    problems.number("storage.rate_hz", s.rate_hz, *STORAGE_RATES_HZ)
-    problems.number("storage.filter_hz", s.filter_hz, *STORAGE_FILTERS_HZ)
-
-
-def _validate_drive(d: object, problems: _Problems) -> None:
-    """Check the drive."""
-    if not isinstance(d, Drive):
-        problems.add("drive", "expected a drive section")
+def _validate_part(part: object, kind: type[Storage | Damper | Drive | Output], what: str, problems: _Problems) -> None:
+    """Check a required section, [storage], [damper], [drive] or [output], by its fields."""
+    name = kind.__name__.lower()
+    if not isinstance(part, kind):
+        problems.add(name, f"expected {what} section")
     else:
-        problems.number("drive.db", d.db, 0.0, 48.0)
-
-
-def _validate_output(o: object, problems: _Problems) -> None:
-    """Check the output section."""
-    if not isinstance(o, Output):
-        problems.add("output", "expected an output section")
-        return
-    problems.integer("output.sample_rate", o.sample_rate, SAMPLE_RATES)
-    problems.choice("output.format", o.format, FORMATS)
-    mode = problems.choice("output.mode", o.mode, MODES)
-    problems.number("output.db", o.db, -60.0, 24.0 if mode == "gain" else 0.0)
-    problems.integer("output.polarity", o.polarity, (1, -1))
+        _check(part, name, problems)
 
 
 # Parsing.
@@ -618,7 +670,7 @@ def _read[S: (Noise, Tone, Storage, Damper, Drive, Output)](
         return None
     values: dict[str, Any] = {}
     for f in fields:
-        spec: Toml = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = t[f.name]
         if spec.kind == "number":
             values[f.name] = _float(v)
@@ -628,7 +680,7 @@ def _read[S: (Noise, Tone, Storage, Damper, Drive, Output)](
             values[f.name] = _pairs(problems, f"{path}.{f.name}", v, spec.keys)
         else:
             values[f.name] = v
-    if any(values[f.name] is None for f in fields if f.metadata["toml"].kind == "pairs"):
+    if any(values[f.name] is None for f in fields if f.metadata["spec"].kind == "pairs"):
         return None
     return section(**values)
 
@@ -735,7 +787,7 @@ def _table(section: Section) -> dict[str, Any]:
     """Return a section as the table TOML parses it to."""
     out: dict[str, Any] = {}
     for f in dataclasses.fields(section):
-        spec: Toml = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = getattr(section, f.name)
         if spec.kind == "band":
             out[f.name] = list(v)
@@ -787,7 +839,7 @@ def _text(section: Section) -> list[str]:
     lines: list[str] = []
     rows: list[Row] = []
     for f in dataclasses.fields(section):
-        spec: Toml = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = getattr(section, f.name)
         if spec.kind != "pairs":
             rows.append((f.name, _value(spec.kind, v), spec.note))
