@@ -156,43 +156,131 @@ def _output_db(problems: _Problems, path: str, db: object, checked: dict[str, An
     return problems.number(path, db, -60.0, 24.0 if checked["mode"] == "gain" else 0.0)
 
 
+# How TOML holds a field: each form reads its value from the parsed table, gives it back as a table would hold
+# it, and writes it as canonical text. Whatever a value holds, the field's check names what is wrong with it.
+
+
+@dataclass(frozen=True)
+class Number:
+    """A number, read as a float, which TOML integers become, and written exactly."""
+
+    def read(self, _problems: _Problems, _path: str, raw: object) -> object:
+        """Return the value as a float, or as it is for its check to name."""
+        return _float(raw)
+
+    def table(self, value: object) -> object:
+        """Return the value as TOML parses it."""
+        return value
+
+    def write(self, value: object) -> str:
+        """Write the value exactly."""
+        return _f(cast("float", value))
+
+
+@dataclass(frozen=True)
+class Integer:
+    """A whole number, read and written as it is."""
+
+    def read(self, _problems: _Problems, _path: str, raw: object) -> object:
+        """Return the value as it is."""
+        return raw
+
+    def table(self, value: object) -> object:
+        """Return the value as TOML parses it."""
+        return value
+
+    def write(self, value: object) -> str:
+        """Write the value as an integer."""
+        return str(value)
+
+
+@dataclass(frozen=True)
+class Choice:
+    """One of a few strings, read as it is and written quoted."""
+
+    def read(self, _problems: _Problems, _path: str, raw: object) -> object:
+        """Return the value as it is."""
+        return raw
+
+    def table(self, value: object) -> object:
+        """Return the value as TOML parses it."""
+        return value
+
+    def write(self, value: object) -> str:
+        """Write the value as a TOML string."""
+        return f'"{value}"'
+
+
+@dataclass(frozen=True)
+class Band:
+    """A band, [low, high] in Hz: read as a tuple of floats, written as an array."""
+
+    def read(self, _problems: _Problems, _path: str, raw: object) -> object:
+        """Return an array as a tuple of floats, or the value as it is for its check to name."""
+        return _band(raw)
+
+    def table(self, value: object) -> object:
+        """Return the band as the array TOML parses it to."""
+        return list(cast("tuple[float, float]", value))
+
+    def write(self, value: object) -> str:
+        """Write the band as a TOML array, each edge exactly."""
+        return _band_text(cast("tuple[float, float]", value))
+
+
+@dataclass(frozen=True)
+class Pairs:
+    """An array of two-key inline tables, such as { ms, gain }: read as tuples, written aligned, or as `[]`."""
+
+    keys: tuple[str, str]
+    empty: str = ""  # the comment when there are no pairs
+
+    def read(self, problems: _Problems, path: str, raw: object) -> object:
+        """Return the pairs, or None after reporting a malformed array."""
+        return _pairs(problems, path, raw, self.keys)
+
+    def table(self, value: object) -> object:
+        """Return the pairs as the array of tables TOML parses them to."""
+        return [{self.keys[0]: a, self.keys[1]: b} for a, b in cast("Knots", value)]
+
+    def lines(self, name: str, value: object, note: str) -> list[str]:
+        """Write the array, its first column aligned, with its comment; or `[]`, with the empty comment."""
+        pairs = cast("Knots", value)
+        if not pairs:
+            return [_note(f"{name} = []", self.empty)]
+        return _array(name, [((self.keys[0], a), (self.keys[1], b)) for a, b in pairs], note)
+
+
+type Form = Number | Integer | Choice | Band | Pairs
+_NUMBER, _INTEGER, _CHOICE, _BAND_FORM = Number(), Integer(), Choice(), Band()
+
+
 @dataclass(frozen=True)
 class Spec:
-    """How a section's field is read, checked and written: its kind, check, a pair's keys and its comments.
+    """How a section's field is read, checked and written: its form, its check and its comment.
 
-    A number is a float written exactly, an integer and a choice are written as
-    they are, a band is [low, high] and pairs are an array of two-key inline
-    tables, written as `[]` with the `empty` comment when there are none. The
-    check sees the fields checked before it, for the rules between fields.
+    The check sees the fields checked before it, for the rules between fields.
     """
 
-    kind: str  # "number", "integer", "choice", "band" or "pairs"
+    form: Form
     check: Check
-    keys: tuple[str, str] = ("", "")
     note: str = ""
-    empty: str = ""
 
 
-def _spec(
-    kind: str,
-    check: Check,
-    keys: tuple[str, str] = ("", ""),
-    note: str = "",
-    empty: str = "",
-) -> dict[str, Spec]:
+def _spec(form: Form, check: Check, note: str = "") -> dict[str, Spec]:
     """Return a field's metadata: how it is read, checked and written."""
-    return {"spec": Spec(kind, check, keys, note, empty)}
+    return {"spec": Spec(form, check, note)}
 
 
-_LEVEL = _spec("number", _range(-90.0, 24.0, silence=True))
-_BAND = _spec("band", _edges)
-_SHAPE = _spec("pairs", _shape, ("ms", "gain"), "shape: 0 at both ends, peak exactly 1")
-_DAMPING = _spec("number", _range(0.0, 3.0), note="content at f decays (f / f_ref)^damping times faster")
-_BLOOM = _spec("number", _range(0.0, 3.0), note="and rises (f / f_ref)^bloom times slower")
-_CHATTER = _spec("number", _range(0.0, 1.0), note="0 … 1: gated at chatter_hz, as plates that slap")
-_CHATTER_HZ = _spec("number", _range(10.0, 4000.0))
-_GRAINS = _spec("number", _grains, note="collisions per second at the shape's peak, a rattle; 0 = none")
-_GRAIN_MS = _spec("number", _grain_ms, note="each collision rings down 60 dB in this time")
+_LEVEL = _spec(_NUMBER, _range(-90.0, 24.0, silence=True))
+_BAND = _spec(_BAND_FORM, _edges)
+_SHAPE = _spec(Pairs(("ms", "gain")), _shape, "shape: 0 at both ends, peak exactly 1")
+_DAMPING = _spec(_NUMBER, _range(0.0, 3.0), note="content at f decays (f / f_ref)^damping times faster")
+_BLOOM = _spec(_NUMBER, _range(0.0, 3.0), note="and rises (f / f_ref)^bloom times slower")
+_CHATTER = _spec(_NUMBER, _range(0.0, 1.0), note="0 … 1: gated at chatter_hz, as plates that slap")
+_CHATTER_HZ = _spec(_NUMBER, _range(10.0, 4000.0))
+_GRAINS = _spec(_NUMBER, _grains, note="collisions per second at the shape's peak, a rattle; 0 = none")
+_GRAIN_MS = _spec(_NUMBER, _grain_ms, note="each collision rings down 60 dB in this time")
 
 
 class PatchError(ValueError):
@@ -211,7 +299,7 @@ class Noise:
     level_db: float = field(metadata=_LEVEL)
     band_hz: tuple[float, float] = field(metadata=_BAND)  # (low, high)
     spacing_hz: float = field(
-        metadata=_spec("number", _spacing, note="mean distance between modes; 0 = continuous noise"),
+        metadata=_spec(_NUMBER, _spacing, note="mean distance between modes; 0 = continuous noise"),
     )
     damping: float = field(metadata=_DAMPING)
     bloom: float = field(metadata=_BLOOM)
@@ -232,10 +320,10 @@ class Tone:
     """A tone: sine or band-limited square partials at fixed frequencies, through a band, under a shape."""
 
     level_db: float = field(metadata=_LEVEL)
-    wave: str = field(metadata=_spec("choice", _one_of(WAVES), note='"sine" | "square"'))
-    phase: str = field(metadata=_spec("choice", _one_of(PHASES), note='"strike" | "free"'))
+    wave: str = field(metadata=_spec(_CHOICE, _one_of(WAVES), note='"sine" | "square"'))
+    phase: str = field(metadata=_spec(_CHOICE, _one_of(PHASES), note='"strike" | "free"'))
     partials: tuple[tuple[float, float], ...] = field(  # ((hz, level_db), ...)
-        metadata=_spec("pairs", _partials, ("hz", "level_db"), "loudest exactly 0 dB; at the nearest 1/8 Hz"),
+        metadata=_spec(Pairs(("hz", "level_db")), _partials, "loudest exactly 0 dB; at the nearest 1/8 Hz"),
     )
     band_hz: tuple[float, float] = field(metadata=_BAND)
     damping: float = field(metadata=_DAMPING)
@@ -258,20 +346,20 @@ class Storage:
 
     bits: int = field(
         metadata=_spec(
-            "integer",
+            _INTEGER,
             _one_of_numbers(STORAGE_BITS),
             note="0 = off; else 2 … 16, quantized against the sound's peak",
         ),
     )
     rate_hz: float = field(
         metadata=_spec(
-            "number",
+            _NUMBER,
             _range(*STORAGE_RATES_HZ),
             note="stored at this rate, as near as the internal rate allows",
         ),
     )
     filter_hz: float = field(
-        metadata=_spec("number", _range(*STORAGE_FILTERS_HZ), note="played back through a low-pass, −3 dB here"),
+        metadata=_spec(_NUMBER, _range(*STORAGE_FILTERS_HZ), note="played back through a low-pass, −3 dB here"),
     )
 
 
@@ -280,7 +368,7 @@ class Damper:
     """The damper, which multiplies every source: no knots, or a curve from 1 down to 0."""
 
     amp: Knots = field(
-        metadata=_spec("pairs", _damper_amp, ("ms", "gain"), "from 1 down to 0", "no knots: never damped"),
+        metadata=_spec(Pairs(("ms", "gain"), "no knots: never damped"), _damper_amp, "from 1 down to 0"),
     )
 
 
@@ -288,18 +376,18 @@ class Damper:
 class Drive:
     """The saturator's small-signal gain in dB; 0 is bypass."""
 
-    db: float = field(metadata=_spec("number", _range(0.0, 48.0), note="small-signal gain; 0 = bypass"))
+    db: float = field(metadata=_spec(_NUMBER, _range(0.0, 48.0), note="small-signal gain; 0 = bypass"))
 
 
 @dataclass(frozen=True)
 class Output:
     """The exported file: its sample rate, format, level and polarity."""
 
-    sample_rate: int = field(metadata=_spec("integer", _one_of_numbers(SAMPLE_RATES)))
-    format: str = field(metadata=_spec("choice", _one_of(FORMATS), note='"float32" | "pcm24" | "pcm16"'))
-    mode: str = field(metadata=_spec("choice", _one_of(MODES), note='"gain" | "peak" | "true-peak"'))
-    db: float = field(metadata=_spec("number", _output_db, note="gain in dB, or peak target in dBFS"))
-    polarity: int = field(metadata=_spec("integer", _one_of_numbers((1, -1))))
+    sample_rate: int = field(metadata=_spec(_INTEGER, _one_of_numbers(SAMPLE_RATES)))
+    format: str = field(metadata=_spec(_CHOICE, _one_of(FORMATS), note='"float32" | "pcm24" | "pcm16"'))
+    mode: str = field(metadata=_spec(_CHOICE, _one_of(MODES), note='"gain" | "peak" | "true-peak"'))
+    db: float = field(metadata=_spec(_NUMBER, _output_db, note="gain in dB, or peak target in dBFS"))
+    polarity: int = field(metadata=_spec(_INTEGER, _one_of_numbers((1, -1))))
 
 
 @dataclass(frozen=True)
@@ -669,20 +757,12 @@ def _read[S: (Noise, Tone, Storage, Damper, Drive, Output)](
     if t is None:
         return None
     values: dict[str, Any] = {}
+    unread = False  # an array of pairs whose problems are reported
     for f in fields:
-        spec: Spec = f.metadata["spec"]
-        v = t[f.name]
-        if spec.kind == "number":
-            values[f.name] = _float(v)
-        elif spec.kind == "band":
-            values[f.name] = _band(v)
-        elif spec.kind == "pairs":
-            values[f.name] = _pairs(problems, f"{path}.{f.name}", v, spec.keys)
-        else:
-            values[f.name] = v
-    if any(values[f.name] is None for f in fields if f.metadata["spec"].kind == "pairs"):
-        return None
-    return section(**values)
+        form: Form = f.metadata["spec"].form
+        values[f.name] = form.read(problems, f"{path}.{f.name}", t[f.name])
+        unread |= isinstance(form, Pairs) and values[f.name] is None
+    return None if unread else section(**values)
 
 
 def _noise(problems: _Problems, path: str, table: object) -> Noise | None:
@@ -785,17 +865,7 @@ def load(path: str | os.PathLike[str]) -> Patch:
 
 def _table(section: Section) -> dict[str, Any]:
     """Return a section as the table TOML parses it to."""
-    out: dict[str, Any] = {}
-    for f in dataclasses.fields(section):
-        spec: Spec = f.metadata["spec"]
-        v = getattr(section, f.name)
-        if spec.kind == "band":
-            out[f.name] = list(v)
-        elif spec.kind == "pairs":
-            out[f.name] = [{spec.keys[0]: a, spec.keys[1]: b} for a, b in v]
-        else:
-            out[f.name] = v
-    return out
+    return {f.name: f.metadata["spec"].form.table(getattr(section, f.name)) for f in dataclasses.fields(section)}
 
 
 def to_dict(p: Patch) -> dict[str, Any]:
@@ -841,27 +911,13 @@ def _text(section: Section) -> list[str]:
     for f in dataclasses.fields(section):
         spec: Spec = f.metadata["spec"]
         v = getattr(section, f.name)
-        if spec.kind != "pairs":
-            rows.append((f.name, _value(spec.kind, v), spec.note))
-            continue
-        lines += _rows(rows) if rows else []
-        rows = []
-        if v:
-            lines += _array(f.name, [((spec.keys[0], a), (spec.keys[1], b)) for a, b in v], spec.note)
+        if isinstance(spec.form, Pairs):
+            lines += _rows(rows) if rows else []
+            rows = []
+            lines += spec.form.lines(f.name, v, spec.note)
         else:
-            lines.append(_note(f"{f.name} = []", spec.empty))
+            rows.append((f.name, spec.form.write(v), spec.note))
     return lines + (_rows(rows) if rows else [])
-
-
-def _value(kind: str, v: object) -> str:
-    """Write a single value by its field's kind: a number exactly, a choice quoted, a band as an array."""
-    if kind == "number":
-        return _f(cast("float", v))
-    if kind == "choice":
-        return f'"{v}"'
-    if kind == "band":
-        return _band_text(cast("tuple[float, float]", v))
-    return str(v)
 
 
 def _f(x: float) -> str:
