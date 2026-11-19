@@ -15,7 +15,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from brightwork_synth import patch
+from brightwork_synth import cli, patch
 from brightwork_synth.patch import PatchError, dumps, from_dict, loads
 
 from .conftest import EXAMPLE, TONE, edit, example, make, make_tone
@@ -690,3 +690,59 @@ def test_softer_lengthens_a_rise_of_several_knots_in_proportion() -> None:
     for db in (math.inf, math.nan):
         assert problems(patch.softer, p, db) == [f"DB: must be a finite number, found {db!r}"]
     assert problems(patch.softer, p, 6.0, contact=math.nan) == ["--contact: must be a finite number, found nan"]
+
+
+@pytest.mark.parametrize("name", cli.REFERENCES)
+def test_every_reference_is_written_back_as_shipped(name: str) -> None:
+    """Write each reference back as its file has it, every canonical comment included."""
+    text = cli.reference_text(name)
+    assert dumps(loads(text)) == text
+
+
+def test_a_value_of_no_toml_kind_is_named_by_its_type(example_dict: dict[str, Any]) -> None:
+    """Name a value TOML cannot hold, such as None, by its Python type, and a number where tables go as one."""
+    example_dict["noise"] = 5
+    assert "noise: expected an array of tables ([[noise]]), found an integer" in problems(from_dict, example_dict)
+    example_dict["noise"] = None
+    assert "noise: expected an array of tables ([[noise]]), found NoneType" in problems(from_dict, example_dict)
+
+
+def test_a_pitch_just_flat_reads_as_plus_zero_cents() -> None:
+    """Describe a pitch 0.04 cents flat of A4 as on it, with no minus sign before the zero."""
+    assert patch.describe_pitch(440.0 * 2 ** (-0.0004 / 12)) == "A4 +0.0 cents"
+
+
+def test_pitch_moves_a_tones_chatter_with_its_partials() -> None:
+    """Lower a tone an octave, and find its chatter rate halved with its partials."""
+    tone = make_tone()
+    down = patch.pitch(tone, "-12").tone[0]
+    assert down.chatter_hz == tone.tone[0].chatter_hz / 2
+    assert down.partials[0][0] == tone.tone[0].partials[0][0] / 2
+
+
+def test_stretch_all_moves_every_shape_and_a_damper_with_knots() -> None:
+    """Stretch everything: every source's shape, and the damper only when it has knots, the others still moved."""
+    p = make()
+    every = patch.stretch(p, "all", 2.0)
+    assert all(a.amp != b.amp for a, b in zip(every.noise, p.noise, strict=True))
+    assert every.damper == p.damper  # no knots: never damped, nothing to stretch
+    named = patch.stretch(p, ["damper.amp", "noise[1].amp"], 2.0)
+    assert named.noise[0].amp == every.noise[0].amp
+    choked = patch.choke(p, 100.0)
+    assert patch.stretch(choked, "all", 2.0).damper != choked.damper
+
+
+def test_stretch_names_a_curve_the_patch_does_not_have() -> None:
+    """Refuse a curve that is not one of the patch's, listing those it has."""
+    p = make()
+    with pytest.raises(PatchError) as caught:
+        patch.stretch(p, "tone[1].amp", 2.0)
+    names = ", ".join(patch.curve_names(p))
+    assert caught.value.problems == [f"tone[1].amp: not a curve of this patch; expected all or one of {names}"]
+
+
+def test_a_choke_release_needs_room_for_its_knots() -> None:
+    """Refuse a release too short to hold its six knots 10 µs apart, saying how long it must be."""
+    with pytest.raises(PatchError) as caught:
+        patch.choke_knots(100.0, 0.05)
+    assert caught.value.problems == ["--release: needs at least 0.06 ms, found 0.05"]
