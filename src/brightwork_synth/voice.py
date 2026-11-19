@@ -297,6 +297,7 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
     """
     v, ip, tabs, _ = model
     x = np.zeros(count)
+    damper = v.damper if damped else None
     workers = workers or carrier.threads()
     with carrier.single_threaded(), ThreadPoolExecutor(workers) as pool:
         for s in v.audible:
@@ -304,30 +305,39 @@ def synthesize_x(model: Model, rate: int, count: int, workers: int | None = None
             if lo >= hi:
                 continue
             spans = [sample_span(float(sb.env.t[0]), float(sb.env.t[-1]), rate, count) for sb in s.subbands]
-
-            def run(
-                block: int,
-                s: Source = s,
-                lo: int = lo,
-                hi: int = hi,
-                spans: list[Span] = spans,
-            ) -> None:
-                b0 = block * carrier.BLOCK
-                n0, n1 = max(lo, b0), min(hi, b0 + carrier.BLOCK)
-                t = np.arange(n0, n1) / rate
-                acc = np.zeros(n1 - n0)
-                for sb, tab, (first, last) in zip(s.subbands, tabs[s.path], spans, strict=True):
-                    a, b = max(first, n0), min(last, n1)
-                    if a < b:
-                        c = carrier.block(tab, ip, b0)
-                        acc[a - n0 : b - n0] += sb.env.on(t[a - n0 : b - n0]) * c[a - b0 : b - b0]
-                factor = s.gain * gate(s, n0, n1, rate)
-                if damped and v.damper is not None:
-                    factor = factor * v.damper.on(t)
-                x[n0:n1] += factor * acc
-
-            list(pool.map(run, range(lo // carrier.BLOCK, (hi - 1) // carrier.BLOCK + 1)))
+            blocks = _Blocks(x, s, tabs[s.path], spans, (lo, hi), ip, rate, damper)
+            list(pool.map(blocks.add, range(lo // carrier.BLOCK, (hi - 1) // carrier.BLOCK + 1)))
     return x
+
+
+@dataclass(frozen=True)
+class _Blocks:
+    """One audible source, added to x block by block: each block's sub-bands summed in order, then gated and damped."""
+
+    x: Floats  # the signal the blocks are added to, each block to its own samples
+    source: Source
+    tables: list[Floats]  # its sub-bands' tables
+    spans: list[Span]  # where each sub-band sounds
+    span: Span  # where the source sounds
+    ip: carrier.Interpolator
+    rate: int
+    damper: Curve | None  # None: the sources before the damper
+
+    def add(self, block: int) -> None:
+        """Add one block of the source to x."""
+        s, b0 = self.source, block * carrier.BLOCK
+        n0, n1 = max(self.span[0], b0), min(self.span[1], b0 + carrier.BLOCK)
+        t = np.arange(n0, n1) / self.rate
+        acc = np.zeros(n1 - n0)
+        for sb, tab, (first, last) in zip(s.subbands, self.tables, self.spans, strict=True):
+            a, b = max(first, n0), min(last, n1)
+            if a < b:
+                c = carrier.block(tab, self.ip, b0)
+                acc[a - n0 : b - n0] += sb.env.on(t[a - n0 : b - n0]) * c[a - b0 : b - b0]
+        factor = s.gain * gate(s, n0, n1, self.rate)
+        if self.damper is not None:
+            factor = factor * self.damper.on(t)
+        self.x[n0:n1] += factor * acc
 
 
 def saturate(alpha: float, x: Floats) -> Floats:

@@ -750,33 +750,35 @@ class Session:
         """Make what a slot's watcher does with a finished render: offer it, or say why not."""
 
         def done(generation: int, result: object, elapsed: float, *, newest: bool) -> None:
-            def say(message: str) -> None:
-                self._say(slot, generation, message)
-
-            if not newest:
-                say("dropped: a newer edit is rendering")
-            elif isinstance(result, PatchError):
-                say(f"invalid patch, still playing the last valid one:\n{result}")
-            elif isinstance(result, Exception):
-                say(f"render failed, still playing the last valid one: {result}")
-            else:
-                audio, report = cast("Rendered", result)
-                if report.over:
-                    say(
-                        f"over full scale by {db(report.peak):.2f} dB; lower output.db. "
-                        "Still playing the last valid buffer.",
-                    )
-                elif report.sample_rate != self.rate:
-                    say(
-                        f"sample rate {report.sample_rate} Hz, but audition plays at {self.rate} Hz; restart audition "
-                        "to hear it. Still playing the last valid buffer.",
-                    )
-                else:
-                    notes = self._accept(slot, (generation, 1), audio, report)
-                    what = f"{len(report.files)} files" if len(report.files) > 1 else "rendered"
-                    say("\n".join([f"{what} in {1000 * elapsed:.0f} ms; plays from its next hit", str(report), *notes]))
+            self._say(slot, generation, self._settle(slot, generation, result, elapsed, newest=newest))
 
         return done
+
+    def _settle(self, slot: int, generation: int, result: object, elapsed: float, *, newest: bool) -> str:
+        """Offer a slot's finished render if it can play, and return what to say about it."""
+        if not newest:
+            return "dropped: a newer edit is rendering"
+        if isinstance(result, PatchError):
+            return f"invalid patch, still playing the last valid one:\n{result}"
+        if isinstance(result, Exception):
+            return f"render failed, still playing the last valid one: {result}"
+        audio, report = cast("Rendered", result)
+        if (refusal := self._unplayable(report)) is not None:
+            return f"{refusal} Still playing the last valid buffer."
+        notes = self._accept(slot, (generation, 1), audio, report)
+        what = f"{len(report.files)} files" if len(report.files) > 1 else "rendered"
+        return "\n".join([f"{what} in {1000 * elapsed:.0f} ms; plays from its next hit", str(report), *notes])
+
+    def _unplayable(self, report: Report) -> str | None:
+        """Say why a render cannot replace what plays: over full scale, or at another rate; None if it can."""
+        if report.over:
+            return f"over full scale by {db(report.peak):.2f} dB; lower output.db."
+        if report.sample_rate != self.rate:
+            return (
+                f"sample rate {report.sample_rate} Hz, but audition plays at {self.rate} Hz; "
+                "restart audition to hear it."
+            )
+        return None
 
 
 def audition(
