@@ -24,7 +24,7 @@ import datetime as dt
 import math
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -63,6 +63,37 @@ MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as wr
 PAIR = 2  # a knot, a partial and a band are two numbers each
 
 
+@dataclass(frozen=True)
+class Toml:
+    """How a section's field is written in TOML: its kind, a pair's keys and the canonical comment.
+
+    A number is a float written exactly, an integer and a choice are written as
+    they are, a band is [low, high] and pairs are an array of two-key inline
+    tables, written as `[]` with the `empty` comment when there are none.
+    Ranges, and every rule between fields, belong to validation.
+    """
+
+    kind: str  # "number", "integer", "choice", "band" or "pairs"
+    keys: tuple[str, str] = ("", "")
+    note: str = ""
+    empty: str = ""
+
+
+def _toml(kind: str, keys: tuple[str, str] = ("", ""), note: str = "", empty: str = "") -> dict[str, Toml]:
+    """Return a field's metadata: how it is written in TOML."""
+    return {"toml": Toml(kind, keys, note, empty)}
+
+
+_NUMBER = _toml("number")
+_BAND = _toml("band")
+_SHAPE = _toml("pairs", ("ms", "gain"), "shape: 0 at both ends, peak exactly 1")
+_DAMPING = _toml("number", note="content at f decays (f / f_ref)^damping times faster")
+_BLOOM = _toml("number", note="and rises (f / f_ref)^bloom times slower")
+_CHATTER = _toml("number", note="0 … 1: gated at chatter_hz, as plates that slap")
+_GRAINS = _toml("number", note="collisions per second at the shape's peak, a rattle; 0 = none")
+_GRAIN_MS = _toml("number", note="each collision rings down 60 dB in this time")
+
+
 class PatchError(ValueError):
     """An invalid patch or edit. `problems` lists every reason, each with its field path."""
 
@@ -76,16 +107,16 @@ class PatchError(ValueError):
 class Noise:
     """A noise source: continuous noise, or seeded modes at a mean spacing, through a band, under a shape."""
 
-    level_db: float
-    band_hz: tuple[float, float]  # (low, high)
-    spacing_hz: float  # 0: continuous noise
-    damping: float
-    bloom: float
-    chatter: float
-    chatter_hz: float
-    grains_hz: float  # 0: no rattle
-    grain_ms: float
-    amp: Knots  # ((ms, gain), ...)
+    level_db: float = field(metadata=_NUMBER)
+    band_hz: tuple[float, float] = field(metadata=_BAND)  # (low, high)
+    spacing_hz: float = field(metadata=_toml("number", note="mean distance between modes; 0 = continuous noise"))
+    damping: float = field(metadata=_DAMPING)
+    bloom: float = field(metadata=_BLOOM)
+    chatter: float = field(metadata=_CHATTER)
+    chatter_hz: float = field(metadata=_NUMBER)
+    grains_hz: float = field(metadata=_GRAINS)  # 0: no rattle
+    grain_ms: float = field(metadata=_GRAIN_MS)
+    amp: Knots = field(metadata=_SHAPE)  # ((ms, gain), ...)
 
     @property
     def f_ref(self) -> float:
@@ -97,18 +128,20 @@ class Noise:
 class Tone:
     """A tone: sine or band-limited square partials at fixed frequencies, through a band, under a shape."""
 
-    level_db: float
-    wave: str
-    phase: str
-    partials: tuple[tuple[float, float], ...]  # ((hz, level_db), ...)
-    band_hz: tuple[float, float]
-    damping: float
-    bloom: float
-    chatter: float
-    chatter_hz: float
-    grains_hz: float
-    grain_ms: float
-    amp: Knots
+    level_db: float = field(metadata=_NUMBER)
+    wave: str = field(metadata=_toml("choice", note='"sine" | "square"'))
+    phase: str = field(metadata=_toml("choice", note='"strike" | "free"'))
+    partials: tuple[tuple[float, float], ...] = field(  # ((hz, level_db), ...)
+        metadata=_toml("pairs", ("hz", "level_db"), "loudest exactly 0 dB; at the nearest 1/8 Hz"),
+    )
+    band_hz: tuple[float, float] = field(metadata=_BAND)
+    damping: float = field(metadata=_DAMPING)
+    bloom: float = field(metadata=_BLOOM)
+    chatter: float = field(metadata=_CHATTER)
+    chatter_hz: float = field(metadata=_NUMBER)
+    grains_hz: float = field(metadata=_GRAINS)
+    grain_ms: float = field(metadata=_GRAIN_MS)
+    amp: Knots = field(metadata=_SHAPE)
 
     @property
     def f_ref(self) -> float:
@@ -120,34 +153,34 @@ class Tone:
 class Storage:
     """Low-resolution storage, as in a drum machine's sample memory: off at 0 bits."""
 
-    bits: int  # 0: off; else 2 … 16
-    rate_hz: float  # the rate the sound is stored at, as near as the internal rate's divisors allow
-    filter_hz: float  # the playback low-pass's −3 dB point
+    bits: int = field(metadata=_toml("integer", note="0 = off; else 2 … 16, quantized against the sound's peak"))
+    rate_hz: float = field(metadata=_toml("number", note="stored at this rate, as near as the internal rate allows"))
+    filter_hz: float = field(metadata=_toml("number", note="played back through a low-pass, −3 dB here"))
 
 
 @dataclass(frozen=True)
 class Damper:
     """The damper, which multiplies every source: no knots, or a curve from 1 down to 0."""
 
-    amp: Knots  # ((ms, gain), ...)
+    amp: Knots = field(metadata=_toml("pairs", ("ms", "gain"), "from 1 down to 0", "no knots: never damped"))
 
 
 @dataclass(frozen=True)
 class Drive:
     """The saturator's small-signal gain in dB; 0 is bypass."""
 
-    db: float
+    db: float = field(metadata=_toml("number", note="small-signal gain; 0 = bypass"))
 
 
 @dataclass(frozen=True)
 class Output:
     """The exported file: its sample rate, format, level and polarity."""
 
-    sample_rate: int
-    format: str
-    mode: str
-    db: float
-    polarity: int
+    sample_rate: int = field(metadata=_toml("integer"))
+    format: str = field(metadata=_toml("choice", note='"float32" | "pcm24" | "pcm16"'))
+    mode: str = field(metadata=_toml("choice", note='"gain" | "peak" | "true-peak"'))
+    db: float = field(metadata=_toml("number", note="gain in dB, or peak target in dBFS"))
+    polarity: int = field(metadata=_toml("integer"))
 
 
 @dataclass(frozen=True)
@@ -505,16 +538,7 @@ def _validate_output(o: object, problems: _Problems) -> None:
 
 # Parsing.
 
-_COMMON = ("band_hz", "damping", "bloom", "chatter", "chatter_hz", "grains_hz", "grain_ms", "amp")
-_FIELDS = {
-    "": ("instrument", "schema", "seed", "take", "noise", "tone", "storage", "damper", "drive", "output"),
-    "noise": ("level_db", "band_hz", "spacing_hz", *_COMMON[1:]),
-    "tone": ("level_db", "wave", "phase", "partials", *_COMMON),
-    "storage": ("bits", "rate_hz", "filter_hz"),
-    "damper": ("amp",),
-    "drive": ("db",),
-    "output": ("sample_rate", "format", "mode", "db", "polarity"),
-}
+_TOP = ("instrument", "schema", "seed", "take", "noise", "tone", "storage", "damper", "drive", "output")
 _OPTIONAL = ("noise", "tone")
 
 
@@ -574,51 +598,49 @@ def _band[T](v: T) -> T | tuple[Any, ...]:
     return tuple(map(_float, v)) if isinstance(v, list) else v
 
 
-def _noise(problems: _Problems, path: str, table: object) -> Noise | None:
-    """Build a noise source from its table; None after reporting what is missing."""
-    t = _section(problems, path, table, _FIELDS["noise"])
+type Section = Noise | Tone | Storage | Damper | Drive | Output
+
+
+def _read[S: (Noise, Tone, Storage, Damper, Drive, Output)](
+    problems: _Problems,
+    path: str,
+    table: object,
+    section: type[S],
+) -> S | None:
+    """Build a section from its table, by its fields; None after reporting what is missing or malformed.
+
+    Numbers become floats, a band a tuple and pairs tuples; whatever a value
+    holds, the section's validation names what is wrong with it.
+    """
+    fields = dataclasses.fields(section)
+    t = _section(problems, path, table, tuple(f.name for f in fields))
     if t is None:
         return None
-    amp = _pairs(problems, f"{path}.amp", t["amp"], ("ms", "gain"))
-    if amp is None:
+    values: dict[str, Any] = {}
+    for f in fields:
+        spec: Toml = f.metadata["toml"]
+        v = t[f.name]
+        if spec.kind == "number":
+            values[f.name] = _float(v)
+        elif spec.kind == "band":
+            values[f.name] = _band(v)
+        elif spec.kind == "pairs":
+            values[f.name] = _pairs(problems, f"{path}.{f.name}", v, spec.keys)
+        else:
+            values[f.name] = v
+    if any(values[f.name] is None for f in fields if f.metadata["toml"].kind == "pairs"):
         return None
-    return Noise(
-        _float(t["level_db"]),
-        _band(t["band_hz"]),
-        _float(t["spacing_hz"]),
-        _float(t["damping"]),
-        _float(t["bloom"]),
-        _float(t["chatter"]),
-        _float(t["chatter_hz"]),
-        _float(t["grains_hz"]),
-        _float(t["grain_ms"]),
-        amp,
-    )
+    return section(**values)
+
+
+def _noise(problems: _Problems, path: str, table: object) -> Noise | None:
+    """Build a noise source from its table."""
+    return _read(problems, path, table, Noise)
 
 
 def _tone(problems: _Problems, path: str, table: object) -> Tone | None:
-    """Build a tone from its table; None after reporting what is missing."""
-    t = _section(problems, path, table, _FIELDS["tone"])
-    if t is None:
-        return None
-    partials = _pairs(problems, f"{path}.partials", t["partials"], ("hz", "level_db"))
-    amp = _pairs(problems, f"{path}.amp", t["amp"], ("ms", "gain"))
-    if partials is None or amp is None:
-        return None
-    return Tone(
-        _float(t["level_db"]),
-        t["wave"],
-        t["phase"],
-        partials,
-        _band(t["band_hz"]),
-        _float(t["damping"]),
-        _float(t["bloom"]),
-        _float(t["chatter"]),
-        _float(t["chatter_hz"]),
-        _float(t["grains_hz"]),
-        _float(t["grain_ms"]),
-        amp,
-    )
+    """Build a tone from its table."""
+    return _read(problems, path, table, Tone)
 
 
 def _header(data: dict[str, Any]) -> None:
@@ -652,33 +674,10 @@ def _sources[S: (Noise, Tone)](
     return None if any(b is None for b in built) else tuple(b for b in built if b is not None)
 
 
-def _storage(problems: _Problems, data: dict[str, Any]) -> Storage | None:
-    """Build the storage section; None after reporting what is wrong."""
-    if "storage" not in data or (t := _section(problems, "storage", data["storage"], _FIELDS["storage"])) is None:
-        return None
-    return Storage(t["bits"], _float(t["rate_hz"]), _float(t["filter_hz"]))
-
-
-def _damper(problems: _Problems, data: dict[str, Any]) -> Damper | None:
-    """Build the damper section; None after reporting what is wrong."""
-    if "damper" not in data or (t := _section(problems, "damper", data["damper"], _FIELDS["damper"])) is None:
-        return None
-    amp = _pairs(problems, "damper.amp", t["amp"], ("ms", "gain"))
-    return None if amp is None else Damper(amp)
-
-
-def _drive(problems: _Problems, data: dict[str, Any]) -> Drive | None:
-    """Build the drive section; None after reporting what is wrong."""
-    if "drive" not in data or (t := _section(problems, "drive", data["drive"], _FIELDS["drive"])) is None:
-        return None
-    return Drive(_float(t["db"]))
-
-
-def _output(problems: _Problems, data: dict[str, Any]) -> Output | None:
-    """Build the output section; None after reporting what is wrong."""
-    if "output" not in data or (t := _section(problems, "output", data["output"], _FIELDS["output"])) is None:
-        return None
-    return Output(t["sample_rate"], t["format"], t["mode"], _float(t["db"]), t["polarity"])
+def _part[S: (Storage, Damper, Drive, Output)](problems: _Problems, data: dict[str, Any], section: type[S]) -> S | None:
+    """Build a required section, [storage], [damper], [drive] or [output]; None after reporting what is wrong."""
+    name = section.__name__.lower()
+    return _read(problems, name, data[name], section) if name in data else None
 
 
 def from_dict(data: object) -> Patch:
@@ -687,11 +686,11 @@ def from_dict(data: object) -> Patch:
         raise PatchError(["expected a table"])
     _header(data)
     problems = _Problems()
-    _keys(problems, "", data, _FIELDS[""], _OPTIONAL)
+    _keys(problems, "", data, _TOP, _OPTIONAL)
     noise = _sources(problems, data, "noise", _noise)
     tone = _sources(problems, data, "tone", _tone)
-    storage, damper = _storage(problems, data), _damper(problems, data)
-    drive, output = _drive(problems, data), _output(problems, data)
+    storage, damper = _part(problems, data, Storage), _part(problems, data, Damper)
+    drive, output = _part(problems, data, Drive), _part(problems, data, Output)
     if noise is None or tone is None or storage is None or damper is None or drive is None or output is None:
         raise PatchError(problems or ["invalid patch"])
     if "seed" not in data or "take" not in data:
@@ -732,60 +731,30 @@ def load(path: str | os.PathLike[str]) -> Patch:
     return loads(text)
 
 
-def _knots_dict(knots: Knots) -> list[dict[str, float]]:
-    """Return knots as TOML parses them: an array of { ms, gain } tables."""
-    return [{"ms": m, "gain": g} for m, g in knots]
+def _table(section: Section) -> dict[str, Any]:
+    """Return a section as the table TOML parses it to."""
+    out: dict[str, Any] = {}
+    for f in dataclasses.fields(section):
+        spec: Toml = f.metadata["toml"]
+        v = getattr(section, f.name)
+        if spec.kind == "band":
+            out[f.name] = list(v)
+        elif spec.kind == "pairs":
+            out[f.name] = [{spec.keys[0]: a, spec.keys[1]: b} for a, b in v]
+        else:
+            out[f.name] = v
+    return out
 
 
 def to_dict(p: Patch) -> dict[str, Any]:
     """Return the plain data that TOML parses to, so that from_dict(to_dict(p)) == p."""
     out: dict[str, Any] = {"instrument": INSTRUMENT, "schema": SCHEMA, "seed": p.seed, "take": p.take}
     if p.noise:
-        out["noise"] = [
-            {
-                "level_db": s.level_db,
-                "band_hz": list(s.band_hz),
-                "spacing_hz": s.spacing_hz,
-                "damping": s.damping,
-                "bloom": s.bloom,
-                "chatter": s.chatter,
-                "chatter_hz": s.chatter_hz,
-                "grains_hz": s.grains_hz,
-                "grain_ms": s.grain_ms,
-                "amp": _knots_dict(s.amp),
-            }
-            for s in p.noise
-        ]
+        out["noise"] = [_table(s) for s in p.noise]
     if p.tone:
-        out["tone"] = [
-            {
-                "level_db": s.level_db,
-                "wave": s.wave,
-                "phase": s.phase,
-                "partials": [{"hz": f, "level_db": v} for f, v in s.partials],
-                "band_hz": list(s.band_hz),
-                "damping": s.damping,
-                "bloom": s.bloom,
-                "chatter": s.chatter,
-                "chatter_hz": s.chatter_hz,
-                "grains_hz": s.grains_hz,
-                "grain_ms": s.grain_ms,
-                "amp": _knots_dict(s.amp),
-            }
-            for s in p.tone
-        ]
-    st = p.storage
-    out["storage"] = {"bits": st.bits, "rate_hz": st.rate_hz, "filter_hz": st.filter_hz}
-    out["damper"] = {"amp": _knots_dict(p.damper.amp)}
-    out["drive"] = {"db": p.drive.db}
-    o = p.output
-    out["output"] = {
-        "sample_rate": o.sample_rate,
-        "format": o.format,
-        "mode": o.mode,
-        "db": o.db,
-        "polarity": o.polarity,
-    }
+        out["tone"] = [_table(s) for s in p.tone]
+    for name, section in (("storage", p.storage), ("damper", p.damper), ("drive", p.drive), ("output", p.output)):
+        out[name] = _table(section)
     return out
 
 
@@ -796,7 +765,6 @@ _COMMENT_COLUMN = 28
 
 def dumps(p: Patch) -> str:
     """Write the complete patch as TOML with the canonical comments; loads(dumps(p)) == p exactly."""
-    o = p.output
     lines = [
         f'instrument = "{INSTRUMENT}"',
         f"schema = {SCHEMA}",
@@ -804,70 +772,44 @@ def dumps(p: Patch) -> str:
         _note(f"take = {p.take}", "the strike: round robins use take, take + 1, …"),
     ]
     for j, s in enumerate(p.noise, 1):
-        lines += ["", _note("[[noise]]", f"noise[{j}]")]
-        lines += _rows(
-            [
-                ("level_db", _f(s.level_db), ""),
-                ("band_hz", _band_text(s.band_hz), ""),
-                ("spacing_hz", _f(s.spacing_hz), "mean distance between modes; 0 = continuous noise"),
-                *_common_rows(s),
-            ],
-        )
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in s.amp], "shape: 0 at both ends, peak exactly 1")
+        lines += ["", _note("[[noise]]", f"noise[{j}]"), *_text(s)]
     for j, t in enumerate(p.tone, 1):
-        lines += ["", _note("[[tone]]", f"tone[{j}]")]
-        lines += _rows(
-            [
-                ("level_db", _f(t.level_db), ""),
-                ("wave", f'"{t.wave}"', '"sine" | "square"'),
-                ("phase", f'"{t.phase}"', '"strike" | "free"'),
-            ],
-        )
-        lines += _array(
-            "partials",
-            [(("hz", f), ("level_db", v)) for f, v in t.partials],
-            "loudest exactly 0 dB; at the nearest 1/8 Hz",
-        )
-        lines += _rows([("band_hz", _band_text(t.band_hz), ""), *_common_rows(t)])
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in t.amp], "shape: 0 at both ends, peak exactly 1")
-    st = p.storage
+        lines += ["", _note("[[tone]]", f"tone[{j}]"), *_text(t)]
     lines += ["", _note("[storage]", "a drum machine's sample memory: the sources stored, then played back")]
-    lines += _rows(
-        [
-            ("bits", str(st.bits), "0 = off; else 2 … 16, quantized against the sound's peak"),
-            ("rate_hz", _f(st.rate_hz), "stored at this rate, as near as the internal rate allows"),
-            ("filter_hz", _f(st.filter_hz), "played back through a low-pass, −3 dB here"),
-        ],
-    )
-    lines += ["", _note("[damper]", "multiplies every source: 1 until damped, then 0")]
-    if p.damper.amp:
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in p.damper.amp], "from 1 down to 0")
-    else:
-        lines += [_note("amp = []", "no knots: never damped")]
-    lines += ["", "[drive]", *_rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])]
-    lines += ["", "[output]"]
-    lines += _rows(
-        [
-            ("sample_rate", str(o.sample_rate), ""),
-            ("format", f'"{o.format}"', '"float32" | "pcm24" | "pcm16"'),
-            ("mode", f'"{o.mode}"', '"gain" | "peak" | "true-peak"'),
-            ("db", _f(o.db), "gain in dB, or peak target in dBFS"),
-            ("polarity", str(o.polarity), ""),
-        ],
-    )
+    lines += _text(p.storage)
+    lines += ["", _note("[damper]", "multiplies every source: 1 until damped, then 0"), *_text(p.damper)]
+    lines += ["", "[drive]", *_text(p.drive), "", "[output]", *_text(p.output)]
     return "\n".join(lines) + "\n"
 
 
-def _common_rows(s: Noise | Tone) -> list[Row]:
-    """Return the rows every source has: damping, bloom, chatter and rattle."""
-    return [
-        ("damping", _f(s.damping), "content at f decays (f / f_ref)^damping times faster"),
-        ("bloom", _f(s.bloom), "and rises (f / f_ref)^bloom times slower"),
-        ("chatter", _f(s.chatter), "0 … 1: gated at chatter_hz, as plates that slap"),
-        ("chatter_hz", _f(s.chatter_hz), ""),
-        ("grains_hz", _f(s.grains_hz), "collisions per second at the shape's peak, a rattle; 0 = none"),
-        ("grain_ms", _f(s.grain_ms), "each collision rings down 60 dB in this time"),
-    ]
+def _text(section: Section) -> list[str]:
+    """Write a section's fields in order: each run of single values as aligned rows, each array of pairs alone."""
+    lines: list[str] = []
+    rows: list[Row] = []
+    for f in dataclasses.fields(section):
+        spec: Toml = f.metadata["toml"]
+        v = getattr(section, f.name)
+        if spec.kind != "pairs":
+            rows.append((f.name, _value(spec.kind, v), spec.note))
+            continue
+        lines += _rows(rows) if rows else []
+        rows = []
+        if v:
+            lines += _array(f.name, [((spec.keys[0], a), (spec.keys[1], b)) for a, b in v], spec.note)
+        else:
+            lines.append(_note(f"{f.name} = []", spec.empty))
+    return lines + (_rows(rows) if rows else [])
+
+
+def _value(kind: str, v: object) -> str:
+    """Write a single value by its field's kind: a number exactly, a choice quoted, a band as an array."""
+    if kind == "number":
+        return _f(cast("float", v))
+    if kind == "choice":
+        return f'"{v}"'
+    if kind == "band":
+        return _band_text(cast("tuple[float, float]", v))
+    return str(v)
 
 
 def _f(x: float) -> str:
