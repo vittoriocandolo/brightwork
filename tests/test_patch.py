@@ -10,7 +10,7 @@ import math
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -495,9 +495,10 @@ def test_programmatic_parts_must_have_their_types() -> None:
         ({"damper": None}, "damper: expected a damper section"),
         ({"drive": None}, "drive: expected a drive section"),
         ({"output": None}, "output: expected an output section"),
-        ({"damper": patch.Damper([(0.0, 1.0)])}, "damper.amp: expected (ms, gain) knots"),  # type: ignore[arg-type]
+        # Lists where the types promise tuples, as an untyped caller may pass them.
+        ({"damper": patch.Damper(cast("patch.Knots", [(0.0, 1.0)]))}, "damper.amp: expected (ms, gain) knots"),
         (
-            {"tone": (dataclasses.replace(tone, partials=[(205.3, 0.0)]),)},  # type: ignore[arg-type]
+            {"tone": (dataclasses.replace(tone, partials=cast("patch.Knots", [(205.3, 0.0)])),)},
             "tone[1].partials: expected (hz, level_db) partials",
         ),
     ]

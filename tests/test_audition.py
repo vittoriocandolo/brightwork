@@ -770,9 +770,14 @@ def test_an_edit_plays_its_first_take_while_the_others_render(
     offered: list[object] = []
     offer = session.hits.offer
 
-    def recorded(slot: int, generation: int | audition.Generation, *rest: object) -> None:
+    def recorded(
+        slot: int,
+        generation: int | audition.Generation,
+        buffers: list[audition.Audio],
+        sample: audition.Audio | None = None,
+    ) -> None:
         offered.append(generation)
-        offer(slot, generation, *rest)  # type: ignore[arg-type]
+        offer(slot, generation, buffers, sample)
 
     monkeypatch.setattr(session.hits, "offer", recorded)
     edit(example, EXAMPLE.replace("db          = -6.0", "db          = -12.0"))
