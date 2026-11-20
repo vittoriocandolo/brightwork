@@ -174,7 +174,7 @@ def test_editing_a_band_reweights_the_same_lines() -> None:
         weight = np.sqrt(sp.band_power(5000.0, 12000.0, f) / sp.band_power(6000.0, 16000.0, f))
         ratio = (b / a) / weight  # the same lines, phases and draws: only a real weight and one constant differ
         np.testing.assert_allclose(ratio, ratio[0], rtol=1e-12)
-        assert ratio[0].imag == 0
+        assert abs(ratio[0].imag) <= 1e-12 * abs(ratio[0])  # real, to the rounding of a complex division
         assert ratio[0].real > 0
 
 
