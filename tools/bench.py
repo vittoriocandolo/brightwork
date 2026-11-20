@@ -72,6 +72,13 @@ class Hit:
     subbands: int
 
 
+def _memory() -> int:
+    """Return this process's peak resident memory, in KiB."""
+    if sys.platform != "win32":
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    sys.exit("the benchmark reads peak memory from the resource module, which Windows lacks")
+
+
 def _hit(name: str, rate: int, ms: float, *, third: bool) -> Hit:
     """Time a reference, stretched to `ms`, at a rate: new takes and cached ones, above the libraries' baseline."""
     text = cli.reference_text(name).replace("sample_rate = 48000", f"sample_rate = {rate}")
@@ -81,7 +88,7 @@ def _hit(name: str, rate: int, ms: float, *, third: bool) -> Hit:
     p = stretch(p, "all", ms / p.length_ms, after_ms=0.0)
     decimator(FAMILY[rate])  # loading the shipped coefficients is not part of a render
     _, report = render(dataclasses.replace(p, take=999))  # first-use costs of the libraries, not of this render
-    base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    base = _memory()
     fresh, cached = float("inf"), float("inf")
     for take in range(1, 1 + REPEAT):
         q = dataclasses.replace(p, take=take)
@@ -91,7 +98,7 @@ def _hit(name: str, rate: int, ms: float, *, third: bool) -> Hit:
         t0 = time.perf_counter()
         render(q)
         cached = min(cached, time.perf_counter() - t0)
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak = _memory()
     return Hit(fresh, cached, (peak - base) / 1024, sum(s.subbands for s in report.sources))
 
 
@@ -102,11 +109,11 @@ def _kit() -> tuple[float, float, int]:
         (key, [(f"{name}{db}", softer(loads(cli.reference_text(name)), db)) for db in (0, 8, 16, 24)])
         for key, name in ((42, "closed"), (44, "pedal"), (46, "open"))
     ]
-    base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    base = _memory()
     t0 = time.perf_counter()
     kit = build(groups, Options(takes=8, chokes=((46, (42, 44)),)))
     seconds = time.perf_counter() - t0
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak = _memory()
     return seconds, (peak - base) / 1024, sum(len(f) for k in kit.keys for f in k.audio)
 
 
