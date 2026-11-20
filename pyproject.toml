@@ -26,12 +26,11 @@ classifiers = [
 ]
 dependencies = ["numpy>=2.4", "scipy>=1.17", "threadpoolctl>=3.1"]
 
-# Replace OWNER with the repository's account before releasing: the release workflow refuses the placeholder.
 [project.urls]
-Repository = "https://github.com/OWNER/brightwork"
-Documentation = "https://github.com/OWNER/brightwork/tree/master/docs"
-Changelog = "https://github.com/OWNER/brightwork/blob/master/CHANGELOG.md"
-Issues = "https://github.com/OWNER/brightwork/issues"
+Repository = "https://github.com/vittoriocandolo/brightwork"
+Documentation = "https://github.com/vittoriocandolo/brightwork/tree/master/docs"
+Changelog = "https://github.com/vittoriocandolo/brightwork/blob/master/CHANGELOG.md"
+Issues = "https://github.com/vittoriocandolo/brightwork/issues"
 
 [project.optional-dependencies]
 audition = ["sounddevice>=0.5"]
