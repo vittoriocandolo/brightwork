@@ -8,6 +8,7 @@ import itertools
 import math
 import multiprocessing
 import re
+import sys
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing.context import BaseContext
@@ -372,9 +373,23 @@ def test_kits_refuse_names_a_map_would_misread(name: str, holds: str) -> None:
         pack.build([(42, [("closed", p)])], stem="kit ")
 
 
-def test_the_command_refuses_a_patch_named_to_misread(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Run `brightwork pack` on a file named to add a region to the map, and write nothing."""
-    evil = tmp_path / "closed\n<region> sample=other.wav key=1.toml"
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            "closed\n<region> sample=other.wav key=1",
+            marks=pytest.mark.skipif(sys.platform == "win32", reason="Windows allows no file a name like this"),
+        ),
+        "closed $KEY",
+    ],
+)
+def test_the_command_refuses_a_patch_named_to_misread(
+    name: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run `brightwork pack` on a file named to add a region to, or break, the map, and write nothing."""
+    evil = tmp_path / f"{name}.toml"
     evil.write_text(cli.reference_text("closed"), encoding="utf-8")
     assert cli.main(["pack", f"42={evil}", "--out", str(tmp_path / "kit")]) == BAD_INPUT
     assert "cannot name a file in an SFZ map" in capsys.readouterr().err
