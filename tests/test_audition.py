@@ -712,7 +712,7 @@ def test_a_watcher_waits_out_unreadable_files_and_stops_cleanly(tmp_path: Path) 
 
     w = audition.Watcher(path, work, done, text="v0")
     w.poll()
-    w.poll()  # the same stamp: not even read
+    w.poll()  # the same content: nothing to render
     path.write_bytes(b"\xff\xfe\xfd")  # a UTF-16 BOM, then half a character
     w.poll()
     path.unlink()
@@ -916,3 +916,39 @@ def test_a_refused_device_stops_every_watcher(tmp_path: Path, example: Path) -> 
     said_then = len(log)
     time.sleep(1.0)  # the second patch rendered behind the first would report here
     assert len(log) == said_then
+
+
+def test_the_watcher_sees_an_edit_stamped_alike(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Find an edit of the same length stamped with the same time, as Windows' 16 ms clock stamps two quick saves.
+
+    Once the file is old enough for its stamp to be trusted, the watcher no longer reads it while the stamp holds.
+    """
+    path = tmp_path / "patch.toml"
+    path.write_text("v0", encoding="utf-8")
+    now = time.time_ns()
+    os.utime(path, ns=(now, now))
+
+    def work(text: str, _generation: int) -> object:
+        return text
+
+    def done(_generation: int, _result: object, _elapsed: float, *, newest: bool) -> None:
+        pass
+
+    w = audition.Watcher(path, work, done, text="v0")
+    w.poll()
+    assert w.generation == 0
+    path.write_text("v1", encoding="utf-8")
+    os.utime(path, ns=(now, now))  # the same size and time as before the edit
+    w.poll()
+    assert w.generation == 1
+    old = now - 2 * audition.RACY_NS
+    os.utime(path, ns=(old, old))
+    w.poll()  # read once more at its new stamp, and unchanged
+
+    def unread(_path: object) -> str:
+        raise AssertionError
+
+    monkeypatch.setattr(audition, "read_text", unread)
+    w.poll()  # an old file whose stamp holds: not read
+    assert w.generation == 1
+    w.stop()
