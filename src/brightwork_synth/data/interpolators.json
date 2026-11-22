@@ -1,0 +1,70 @@
+{
+  "design": {
+    "method": "Kaiser-windowed sinc cut off at R/2, R = 2 x base, linear phase, gain = factor",
+    "passband_hz": 20000.0,
+    "attenuation_db": 280.0,
+    "numpy": "2.4.6"
+  },
+  "filters": {
+    "44100x16": {
+      "base": 44100,
+      "K": 16,
+      "up": 8,
+      "q": 18,
+      "taps": 289,
+      "file": "interpolator-44100x16.f64",
+      "sha256": "6d81956a5e1c230a2c2cb28b030f10b32ca53c780a22770ddfe2c5a47141f00b",
+      "max_error_of_rms": 6.766408273527416e-14
+    },
+    "48000x16": {
+      "base": 48000,
+      "K": 16,
+      "up": 8,
+      "q": 17,
+      "taps": 273,
+      "file": "interpolator-48000x16.f64",
+      "sha256": "e022827ca1ee0f4027196edee19ef8044045fff2118c1d32af55db691d4f8616",
+      "max_error_of_rms": 6.586797608111807e-14
+    },
+    "44100x32": {
+      "base": 44100,
+      "K": 32,
+      "up": 16,
+      "q": 18,
+      "taps": 577,
+      "file": "interpolator-44100x32.f64",
+      "sha256": "03ee6713d4dc9c0b720a9bdf408a51ba0aa6de6a390993141a024517ec228713",
+      "max_error_of_rms": 6.60175639201632e-14
+    },
+    "48000x32": {
+      "base": 48000,
+      "K": 32,
+      "up": 16,
+      "q": 17,
+      "taps": 545,
+      "file": "interpolator-48000x32.f64",
+      "sha256": "823e1465dfdc85533a289a1e5bd8499935092862fc24701fb2490d9c041d9efc",
+      "max_error_of_rms": 7.057283151548364e-14
+    },
+    "44100x64": {
+      "base": 44100,
+      "K": 64,
+      "up": 32,
+      "q": 18,
+      "taps": 1153,
+      "file": "interpolator-44100x64.f64",
+      "sha256": "c6f3370ff70dc8dc65ba1df7adc4a21ffe1e3368fae94f703139cc274c0ebaeb",
+      "max_error_of_rms": 6.60175639201632e-14
+    },
+    "48000x64": {
+      "base": 48000,
+      "K": 64,
+      "up": 32,
+      "q": 17,
+      "taps": 1089,
+      "file": "interpolator-48000x64.f64",
+      "sha256": "6e8e28d9f36fdb8c371bff87aa42002d2ee8e0c8fa347d8530f59de3ac7eadf3",
+      "max_error_of_rms": 7.057283151548364e-14
+    }
+  }
+}
