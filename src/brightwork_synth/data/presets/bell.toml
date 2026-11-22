@@ -1,0 +1,86 @@
+instrument = "cymbal"
+schema = 1
+seed = 1                    # the cymbal: where its modes lie
+take = 1                    # the strike: round robins use take, take + 1, …
+
+[[noise]]                   # noise[1]
+level_db   = -30.2
+band_hz    = [1500.0, 14000.0]
+spacing_hz = 20.0           # mean distance between modes; 0 = continuous noise
+damping    = 0.8            # content at f decays (f / f_ref)^damping times faster
+bloom      = 0.0            # and rises (f / f_ref)^bloom times slower
+chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
+chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
+amp = [                     # shape: 0 at both ends, peak exactly 1
+  { ms = 0.0,    gain = 0.0 },
+  { ms = 1.0,    gain = 1.0 },
+  { ms = 200.0,  gain = 0.4 },
+  { ms = 900.0,  gain = 0.12 },
+  { ms = 2000.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[2]
+level_db   = -32.2
+band_hz    = [2000.0, 16000.0]
+spacing_hz = 0.0            # mean distance between modes; 0 = continuous noise
+damping    = 0.0            # content at f decays (f / f_ref)^damping times faster
+bloom      = 0.0            # and rises (f / f_ref)^bloom times slower
+chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
+chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
+amp = [                     # shape: 0 at both ends, peak exactly 1
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.03, gain = 1.0 },
+  { ms = 0.13, gain = 0.6 },
+  { ms = 1.5,  gain = 0.1 },
+  { ms = 5.0,  gain = 0.0 },
+]
+
+[[tone]]                    # tone[1]
+level_db = -20.2
+wave     = "sine"           # "sine" | "square"
+phase    = "strike"         # "strike" | "free"
+partials = [                # loudest exactly 0 dB; at the nearest 1/8 Hz
+  { hz = 690.0,  level_db = 0.0 },
+  { hz = 1140.0, level_db = -4.0 },
+  { hz = 1610.0, level_db = -3.0 },
+  { hz = 2280.0, level_db = -9.0 },
+  { hz = 2900.0, level_db = -12.0 },
+  { hz = 3730.0, level_db = -15.0 },
+]
+band_hz    = [100.0, 16000.0]
+damping    = 1.0            # content at f decays (f / f_ref)^damping times faster
+bloom      = 0.0            # and rises (f / f_ref)^bloom times slower
+chatter    = 0.0            # 0 … 1: gated at chatter_hz, as plates that slap
+chatter_hz = 220.0
+grains_hz  = 0.0            # collisions per second at the shape's peak, a rattle; 0 = none
+grain_ms   = 10.0           # each collision rings down 60 dB in this time
+amp = [                     # shape: 0 at both ends, peak exactly 1
+  { ms = 0.0,    gain = 0.0 },
+  { ms = 0.5,    gain = 1.0 },
+  { ms = 400.0,  gain = 0.4 },
+  { ms = 1300.0, gain = 0.13 },
+  { ms = 2600.0, gain = 0.04 },
+  { ms = 3500.0, gain = 0.0 },
+]
+
+[storage]                   # low-resolution memory: the sources stored, then played back
+bits      = 0               # 0 = off; else 2 … 16, quantized against the sound's peak
+rate_hz   = 32000.0         # stored at this rate, as near as the internal rate allows
+filter_hz = 16000.0         # played back through a low-pass, −3 dB here
+
+[damper]                    # multiplies every source: 1 until damped, then 0
+amp = []                    # no knots: never damped
+
+[drive]
+db = 0.0                    # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -6.0          # gain in dB, or peak target in dBFS
+polarity    = 1
